@@ -1,0 +1,25 @@
+[Unit]
+Description=opendeploy Hosting Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opendeploy
+Group=opendeploy
+ExecStart=/usr/local/bin/opendeploy --config /etc/opendeploy/config.yaml
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=opendeploy
+Environment=opendeploy_ENV=production
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/opendeploy /var/log/opendeploy /etc/cloudflared /etc/nginx/sites-available /etc/nginx/sites-enabled
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,38 @@
+server:
+  port: 3000
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+
+database:
+  path: "/var/lib/opendeploy/state.db"
+
+deploy:
+  workspace_root: "/var/lib/opendeploy/projects"
+  max_concurrent_builds: 1
+  build_timeout: 30m
+  git_binary: "/usr/bin/git"
+  node_binary: "/usr/bin/node"
+  npm_binary: "/usr/bin/npm"
+  python_binary: "/usr/bin/python3"
+
+nginx:
+  sites_available: "/etc/nginx/sites-available"
+  sites_enabled: "/etc/nginx/sites-enabled"
+  log_path: "/var/log/nginx"
+
+cloudflared:
+  binary: "/usr/local/bin/cloudflared"
+  config_path: "/etc/cloudflared/config.yml"
+  credentials_dir: "/etc/cloudflared"
+
+logging:
+  level: "info"
+  log_dir: "/var/log/opendeploy"
+  max_log_size_mb: 50
+  max_log_files: 5
+
+security:
+  session_duration: 24h
+  bcrypt_cost: 12
+  lan_only: true
