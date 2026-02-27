@@ -152,9 +152,18 @@ select:focus-visible {
 
 /* Grid dot pattern */
 .dot-pattern {
+  position: relative;
+}
+
+.dot-pattern::before {
+  content: '';
+  position: absolute;
+  inset: 0;
   background-image: radial-gradient(circle, var(--color-accent) 1px, transparent 1px);
-  opacity: 0.04;
   background-size: 24px 24px;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* Terminal cursor blink */
