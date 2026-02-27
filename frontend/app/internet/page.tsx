@@ -184,7 +184,7 @@ export default function InternetPage() {
                 transition={{ delay: 0.3 }}
               >
                 <Link
-                  href="/tunnel"
+                  href="/tunnel/dashboard"
                   className="inline-flex items-center gap-2 mt-8 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-full hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_20px_rgba(170,255,69,0.3)]"
                 >
                   Proceed to Cloudflare Setup &rarr;
