@@ -31,13 +31,19 @@ type WifiStatus struct {
 }
 
 type WifiService struct {
-	runner *exec.Runner
-	logger *zap.Logger
-	db     *state.DB
+	runner       *exec.Runner
+	logger       *zap.Logger
+	db           *state.DB
+	avahiService *AvahiService
 }
 
 func NewWifiService(runner *exec.Runner, logger *zap.Logger, db *state.DB) *WifiService {
-	return &WifiService{runner: runner, logger: logger, db: db}
+	return &WifiService{
+		runner:       runner,
+		logger:       logger,
+		db:           db,
+		avahiService: NewAvahiService(runner, logger),
+	}
 }
 
 func (w *WifiService) ScanNetworks(ctx context.Context) ([]WifiNetwork, error) {
@@ -114,6 +120,15 @@ func (w *WifiService) Connect(ctx context.Context, ssid, password, jobID string)
 		}
 	}
 
+	// Delete existing connection profile to avoid stale credentials/settings
+	// This prevents the "802-11-wireless-security.key-mgmt: property is missing" error
+	_, _ = w.runner.Run(ctx, exec.RunOpts{
+		JobType: "wifi_delete_connection",
+		Command: "sudo",
+		Args:    []string{"nmcli", "connection", "delete", ssid},
+		Timeout: 5 * time.Second,
+	})
+
 	args := []string{"nmcli", "device", "wifi", "connect", ssid}
 	if password != "" {
 		args = append(args, "password", password)
@@ -124,10 +139,15 @@ func (w *WifiService) Connect(ctx context.Context, ssid, password, jobID string)
 		JobType: "wifi_connect",
 		Command: "sudo",
 		Args:    args,
-		Timeout: 30 * time.Second,
+		Timeout: 45 * time.Second, // Increased timeout for WPA3 networks
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Wait for network to stabilize after connection
+	if result.Success {
+		time.Sleep(3 * time.Second)
 	}
 
 	// Verify actual internet access
@@ -136,6 +156,11 @@ func (w *WifiService) Connect(ctx context.Context, ssid, password, jobID string)
 			result.Success = false
 			result.Error = "WiFi connected but no internet access"
 		} else {
+			// Refresh Avahi to re-broadcast mDNS hostname after network change
+			if err := w.avahiService.RefreshHostname(ctx); err != nil {
+				w.logger.Warn("Failed to refresh Avahi hostname", zap.Error(err))
+			}
+
 			// Save the network and password on successful connection
 			if w.db != nil {
 				now := time.Now()
@@ -227,13 +252,22 @@ func (w *WifiService) getCurrentSSID() string {
 }
 
 func (w *WifiService) verifyInternet() bool {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Head("http://1.1.1.1")
-	if err != nil {
-		return false
+	// Try multiple times with delays to allow network to stabilize
+	for i := 0; i < 5; i++ {
+		if i > 0 {
+			time.Sleep(2 * time.Second)
+		}
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Head("http://1.1.1.1")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode < 400 {
+				return true
+			}
+		}
 	}
-	resp.Body.Close()
-	return resp.StatusCode < 400
+	return false
 }
 
 var ssidRegex = regexp.MustCompile(`^[\w\s\-\.!@#$%^&*()\'":;,+=\[\]{}<>/\?\\]{1,64}$`)
