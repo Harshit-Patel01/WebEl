@@ -262,12 +262,42 @@ export default function TunnelDashboardPage() {
         </div>
 
         <div className="bg-bg-secondary rounded-card border border-border-dark p-12 text-center">
-          <div className="max-w-md mx-auto">
+          <div className="max-w-lg mx-auto">
             <Key className="mx-auto mb-6 text-accent-lime" size={48} />
             <h2 className="font-serif text-h2 mb-4">Access Cloudflare Tunnels</h2>
-            <p className="text-body text-text-secondary mb-8">
+            <p className="text-body text-text-secondary mb-6">
               Enter your Cloudflare API token to view and manage your tunnels
             </p>
+
+            <div className="mb-8 p-6 bg-bg-primary rounded-lg border border-border-dark text-left">
+              <p className="font-mono text-small text-text-secondary mb-4">
+                Don't have a token? <a
+                  href="https://dash.cloudflare.com/profile/api-tokens"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent-lime hover:text-accent-lime-muted underline inline-flex items-center gap-1"
+                >
+                  Create one in Cloudflare <ExternalLink size={12} />
+                </a>
+              </p>
+
+              <div className="space-y-2">
+                <p className="font-mono text-label uppercase tracking-wider text-text-primary mb-3">Required Permissions:</p>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-accent-lime flex-shrink-0" />
+                  <span className="font-mono text-small text-text-secondary">Account → Cloudflare Tunnel → Edit</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-accent-lime flex-shrink-0" />
+                  <span className="font-mono text-small text-text-secondary">Zone → DNS → Edit</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-accent-lime flex-shrink-0" />
+                  <span className="font-mono text-small text-text-secondary">Account → Account Settings → Read</span>
+                </div>
+              </div>
+            </div>
+
             <button
               onClick={() => setShowApiKeyForm(true)}
               className="px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
@@ -294,30 +324,42 @@ export default function TunnelDashboardPage() {
         <div className="bg-bg-secondary rounded-card border border-border-dark p-8 max-w-2xl">
           <h2 className="font-serif text-h2 mb-6">Enter Cloudflare API Token</h2>
 
-          <div className="mb-6 p-4 bg-bg-primary rounded-lg border border-border-dark">
-            <h3 className="font-mono text-small font-bold text-text-primary mb-3">Required Token Permissions:</h3>
-            <ul className="space-y-2 font-mono text-small text-text-secondary">
-              <li className="flex items-start gap-2">
-                <CheckCircle2 size={16} className="text-accent-lime mt-0.5 flex-shrink-0" />
-                <span><strong>Account → Cloudflare Tunnel → Edit</strong></span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle2 size={16} className="text-accent-lime mt-0.5 flex-shrink-0" />
-                <span><strong>Zone → DNS → Edit</strong></span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle2 size={16} className="text-accent-lime mt-0.5 flex-shrink-0" />
-                <span><strong>Account → Account Settings → Read</strong></span>
-              </li>
-            </ul>
-            <a
-              href="https://dash.cloudflare.com/profile/api-tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 mt-4 font-mono text-small text-accent-lime hover:text-accent-lime-muted transition-colors"
-            >
-              Create API Token <ExternalLink size={12} />
-            </a>
+          <div className="mb-6 p-5 bg-bg-primary rounded-lg border border-border-dark">
+            <div className="flex items-start gap-4 mb-4">
+              <Key size={24} className="text-accent-lime flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="font-mono text-small font-bold text-text-primary mb-2">Create Your API Token</h3>
+                <p className="font-mono text-small text-text-secondary mb-3">
+                  Visit your Cloudflare dashboard to generate a new API token with the required permissions.
+                </p>
+                <a
+                  href="https://dash.cloudflare.com/profile/api-tokens"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-accent-lime hover:bg-border-dark transition-all"
+                >
+                  Open Cloudflare Dashboard <ExternalLink size={14} />
+                </a>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-border-dark">
+              <p className="font-mono text-label uppercase tracking-wider text-text-primary mb-3">Required Permissions:</p>
+              <div className="grid grid-cols-1 gap-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-accent-lime flex-shrink-0" />
+                  <span className="font-mono text-small text-text-secondary">Account → Cloudflare Tunnel → Edit</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-accent-lime flex-shrink-0" />
+                  <span className="font-mono text-small text-text-secondary">Zone → DNS → Edit</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={14} className="text-accent-lime flex-shrink-0" />
+                  <span className="font-mono text-small text-text-secondary">Account → Account Settings → Read</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <label className="block font-mono text-label uppercase tracking-wider text-text-secondary mb-2">
