@@ -6,7 +6,7 @@ import Link from 'next/link'
 export default function WelcomePage() {
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col items-center justify-center relative overflow-hidden dot-pattern">
-      <div className="max-w-3xl mx-auto text-center px-6">
+      <div className="max-w-3xl mx-auto text-center px-6 relative z-10">
         {/* Logo */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -57,16 +57,6 @@ export default function WelcomePage() {
             Begin Setup <span className="text-xl">&rarr;</span>
           </Link>
         </motion.div>
-
-        {/* Footnote */}
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.6, delay: 1.6 }}
-          className="mt-16 font-mono text-small text-text-secondary"
-        >
-          Running on opendeploy.local
-        </motion.p>
       </div>
 
       {/* Decorative grid lines */}
