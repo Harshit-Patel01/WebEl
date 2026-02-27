@@ -80,7 +80,7 @@ export default function RootLayout({
 
   if (isWelcomePage) {
     return (
-      <html lang="en">
+      <html lang="en" data-theme="dark" suppressHydrationWarning>
         <head>
           <script
             dangerouslySetInnerHTML={{
@@ -106,7 +106,7 @@ export default function RootLayout({
   }
 
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
