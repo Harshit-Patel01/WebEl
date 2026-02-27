@@ -19,9 +19,9 @@ const mainNav = [
   { label: 'Overview', path: '/dashboard', icon: 'LayoutDashboard' },
   { label: 'WiFi Setup', path: '/wifi', icon: 'Wifi', complete: false},
   { label: 'Internet', path: '/internet', icon: 'Globe', complete: false},
-  { label: 'Cloudflare Tunnel', path: '/tunnel/dashboard', icon: 'Shield' },
   { label: 'GitHub Deploy', path: '/deploy', icon: 'GitBranch' },
   { label: 'Nginx Config', path: '/nginx', icon: 'Server' },
+  { label: 'Cloudflare Tunnel', path: '/tunnel/dashboard', icon: 'Shield' },
   { label: 'Logs', path: '/logs', icon: 'Terminal' },
 ]
 
