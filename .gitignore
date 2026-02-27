@@ -131,7 +131,8 @@ secrets/
 credentials/
 
 # Claude Code memory (optional - uncomment if you don't want to track)
-# .claude/
+.claude/
+copy.sh
 
 # Project specific
 backend/static/frontend/
