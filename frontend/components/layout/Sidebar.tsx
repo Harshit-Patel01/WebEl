@@ -16,13 +16,13 @@ const iconMap: Record<string, React.ElementType> = {
 }
 
 const mainNav = [
-  { label: 'Overview', path: '/dashboard', icon: 'LayoutDashboard', complete: true },
-  { label: 'WiFi Setup', path: '/wifi', icon: 'Wifi', complete: true },
-  { label: 'Internet', path: '/internet', icon: 'Globe', complete: true },
-  { label: 'Cloudflare Tunnel', path: '/tunnel/dashboard', icon: 'Shield', complete: false },
-  { label: 'GitHub Deploy', path: '/deploy', icon: 'GitBranch', complete: false },
-  { label: 'Nginx Config', path: '/nginx', icon: 'Server', complete: false },
-  { label: 'Logs', path: '/logs', icon: 'Terminal', complete: false },
+  { label: 'Overview', path: '/dashboard', icon: 'LayoutDashboard' },
+  { label: 'WiFi Setup', path: '/wifi', icon: 'Wifi', complete: false},
+  { label: 'Internet', path: '/internet', icon: 'Globe', complete: false},
+  { label: 'Cloudflare Tunnel', path: '/tunnel/dashboard', icon: 'Shield' },
+  { label: 'GitHub Deploy', path: '/deploy', icon: 'GitBranch' },
+  { label: 'Nginx Config', path: '/nginx', icon: 'Server' },
+  { label: 'Logs', path: '/logs', icon: 'Terminal' },
 ]
 
 const bottomNav = [
