@@ -15,9 +15,11 @@ export default function WelcomePage() {
           className="mb-12"
         >
           <div className="inline-flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-accent-lime flex items-center justify-center">
-              <span className="font-serif font-bold text-text-dark text-2xl">O</span>
-            </div>
+            <img
+              src="/favicon.svg"
+              alt="OpenDeploy Logo"
+              className="w-12 h-12"
+            />
             <span className="font-serif font-bold text-3xl tracking-tight text-text-primary">OpenDeploy</span>
           </div>
         </motion.div>
