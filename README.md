@@ -17,7 +17,7 @@ go run ./cmd/opendeploy
 
 ## Building the Release Binary (Windows/Mac/Linux)
 
-Because opendeploy uses `modernc.org/sqlite`, it requires absolutely zero C dependencies. You can cross-compile it for a Raspberry Pi 5 from any OS.
+Because opendeploy uses `modernc.org/sqlite`, it requires absolutely zero C dependencies. You can cross-compile it for a ubuntu/debian from any OS.
 
 1. **Build the Next.js Frontend:**
 ```bash
@@ -55,7 +55,7 @@ chmod +x opendeploy-linux-arm64
 ./opendeploy-linux-arm64
 ```
 
-To run it automatically on boot, copy `backend/opendeploy.service` to `/etc/systemd/system/opendeploy.service` on the Pi, then run:
+To run it automatically on boot, copy `backend/opendeploy.service` to `/etc/systemd/system/opendeploy.service` on the ubuntu/linux, then run:
 ```bash
 sudo systemctl enable opendeploy
 sudo systemctl start opendeploy
