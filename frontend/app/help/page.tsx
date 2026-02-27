@@ -93,69 +93,6 @@ export default function HelpPage() {
           </div>
         </section>
 
-        {/* Using OpenDeploy Web GUI */}
-        <section className="mb-12">
-          <div className="flex items-center gap-3 mb-4">
-            <Network className="text-accent-lime" size={24} />
-            <h2 className="font-serif text-h2">Using the OpenDeploy Web GUI</h2>
-          </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6 space-y-6">
-            <div>
-              <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
-                Dashboard Overview
-              </h3>
-              <p className="font-sans text-body text-text-secondary mb-2">
-                The dashboard provides real-time system metrics including CPU usage, memory, disk space, and network activity. Monitor your device health at a glance.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
-                Deploy Page
-              </h3>
-              <p className="font-sans text-body text-text-secondary mb-2">
-                Deploy applications directly from GitHub repositories. Enter your repository URL, configure build settings, and set environment variables. OpenDeploy automatically detects your project type and suggests optimal build configurations.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
-                Tunnel Management
-              </h3>
-              <p className="font-sans text-body text-text-secondary mb-2">
-                Access the Tunnel section to configure Cloudflare Tunnels. Create new tunnels, manage existing ones, and configure routing rules to expose your applications securely to the internet.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
-                Nginx Configuration
-              </h3>
-              <p className="font-sans text-body text-text-secondary mb-2">
-                The Nginx page allows you to manage reverse proxy configurations through a user-friendly interface. Configure domains, SSL certificates, and routing rules without editing configuration files manually.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
-                Logs & Monitoring
-              </h3>
-              <p className="font-sans text-body text-text-secondary mb-2">
-                View real-time logs from your deployed applications and system services. Filter by service, search for specific events, and download logs for offline analysis.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
-                Settings
-              </h3>
-              <p className="font-sans text-body text-text-secondary mb-2">
-                Configure system settings, change your dashboard password, manage API keys, and customize OpenDeploy behavior. Access network settings and system preferences from one central location.
-              </p>
-            </div>
-          </div>
-        </section>
-
         {/* Step-by-Step Deployment */}
         <section className="mb-12">
           <div className="flex items-center gap-3 mb-4">
@@ -450,32 +387,6 @@ python-dotenv==1.0.0`}</pre>
             </div>
 
             <div>
-              <h4 className="font-mono text-small font-bold text-text-primary mb-2">Can't Access Dashboard</h4>
-              <p className="font-sans text-small text-text-secondary mb-2">
-                Ensure you're on the same network as the device. Try accessing via IP address instead of hostname. Check if the OpenDeploy service is running.
-              </p>
-              <div className="mt-2 ml-4 space-y-1 font-sans text-small text-text-secondary">
-                <div>• Verify device is powered on and connected to network</div>
-                <div>• Try accessing via IP address (e.g., http://192.168.1.100:3000)</div>
-                <div>• Check firewall settings on your computer</div>
-                <div>• Ensure OpenDeploy service is running on the device</div>
-              </div>
-            </div>
-
-            <div>
-              <h4 className="font-mono text-small font-bold text-text-primary mb-2">Tunnel Not Connecting</h4>
-              <p className="font-sans text-small text-text-secondary mb-2">
-                Verify your Cloudflare API token has correct permissions. Check that cloudflared service is running. Ensure your domain DNS is pointing to Cloudflare.
-              </p>
-              <div className="mt-2 ml-4 space-y-1 font-sans text-small text-text-secondary">
-                <div>• Regenerate Cloudflare API token with proper permissions</div>
-                <div>• Check tunnel status in Cloudflare dashboard</div>
-                <div>• Verify domain nameservers point to Cloudflare</div>
-                <div>• Review tunnel logs for connection errors</div>
-              </div>
-            </div>
-
-            <div>
               <h4 className="font-mono text-small font-bold text-text-primary mb-2">Application Returns 502 Bad Gateway</h4>
               <p className="font-sans text-small text-text-secondary mb-2">
                 This usually means your application isn't running or isn't listening on the correct port. Check application logs and verify the port configuration.
@@ -511,19 +422,6 @@ python-dotenv==1.0.0`}</pre>
                 <div>• Verify repository is public or token has access</div>
                 <div>• Ensure GitHub personal access token hasn't expired</div>
                 <div>• Check network connectivity to GitHub</div>
-              </div>
-            </div>
-
-            <div>
-              <h4 className="font-mono text-small font-bold text-text-primary mb-2">High CPU or Memory Usage</h4>
-              <p className="font-sans text-small text-text-secondary mb-2">
-                Monitor resource usage in the Dashboard. Optimize your application code or consider upgrading hardware for resource-intensive applications.
-              </p>
-              <div className="mt-2 ml-4 space-y-1 font-sans text-small text-text-secondary">
-                <div>• Identify resource-heavy processes in Dashboard</div>
-                <div>• Optimize application code and database queries</div>
-                <div>• Implement caching where appropriate</div>
-                <div>• Consider horizontal scaling for high-traffic apps</div>
               </div>
             </div>
           </div>
