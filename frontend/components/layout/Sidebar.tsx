@@ -83,9 +83,11 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
       >
         {/* Logo */}
         <div className="px-4 py-5 flex items-center gap-3 border-b border-border-dark">
-          <div className="w-8 h-8 rounded-lg bg-accent-lime flex items-center justify-center flex-shrink-0">
-            <span className="font-serif font-bold text-text-dark text-lg">O</span>
-          </div>
+          <img
+            src="/favicon.svg"
+            alt="OpenDeploy Logo"
+            className="w-8 h-8 flex-shrink-0"
+          />
           {expanded && (
             <span className="font-serif font-bold text-xl tracking-tight">OpenDeploy</span>
           )}
