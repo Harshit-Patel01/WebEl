@@ -56,9 +56,9 @@ func (db *DB) CreateProject(p *Project) error {
 	p.UpdatedAt = now
 
 	_, err := db.conn.Exec(
-		`INSERT INTO projects (id, name, repo_url, branch, project_type, build_command, output_dir, local_port, env_vars, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.OutputDir, p.LocalPort, p.EnvVars, p.CreatedAt, p.UpdatedAt,
+		`INSERT INTO projects (id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.InstallCommand, p.StartCommand, p.OutputDir, p.WorkingDirectory, p.LocalPort, p.EnvVars, p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
@@ -66,8 +66,8 @@ func (db *DB) CreateProject(p *Project) error {
 func (db *DB) GetProject(id string) (*Project, error) {
 	p := &Project{}
 	err := db.conn.QueryRow(
-		"SELECT id, name, repo_url, branch, project_type, build_command, output_dir, local_port, env_vars, created_at, updated_at FROM projects WHERE id = ?", id,
-	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.OutputDir, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
+		"SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at FROM projects WHERE id = ?", id,
+	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -75,7 +75,7 @@ func (db *DB) GetProject(id string) (*Project, error) {
 }
 
 func (db *DB) ListProjects() ([]Project, error) {
-	rows, err := db.conn.Query("SELECT id, name, repo_url, branch, project_type, build_command, output_dir, local_port, env_vars, created_at, updated_at FROM projects ORDER BY created_at DESC")
+	rows, err := db.conn.Query("SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at FROM projects ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (db *DB) ListProjects() ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.OutputDir, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, p)
@@ -95,8 +95,8 @@ func (db *DB) ListProjects() ([]Project, error) {
 func (db *DB) UpdateProject(p *Project) error {
 	p.UpdatedAt = time.Now()
 	_, err := db.conn.Exec(
-		`UPDATE projects SET name=?, repo_url=?, branch=?, project_type=?, build_command=?, output_dir=?, local_port=?, env_vars=?, updated_at=? WHERE id=?`,
-		p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.OutputDir, p.LocalPort, p.EnvVars, p.UpdatedAt, p.ID,
+		`UPDATE projects SET name=?, repo_url=?, branch=?, project_type=?, build_command=?, install_command=?, start_command=?, output_dir=?, working_directory=?, local_port=?, env_vars=?, updated_at=? WHERE id=?`,
+		p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.InstallCommand, p.StartCommand, p.OutputDir, p.WorkingDirectory, p.LocalPort, p.EnvVars, p.UpdatedAt, p.ID,
 	)
 	return err
 }
@@ -104,6 +104,18 @@ func (db *DB) UpdateProject(p *Project) error {
 func (db *DB) DeleteProject(id string) error {
 	_, err := db.conn.Exec("DELETE FROM projects WHERE id = ?", id)
 	return err
+}
+
+func (db *DB) GetProjectByRepoAndBranch(repoURL, branch string) (*Project, error) {
+	p := &Project{}
+	err := db.conn.QueryRow(
+		"SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at FROM projects WHERE repo_url = ? AND branch = ?",
+		repoURL, branch,
+	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return p, err
 }
 
 // --- Deploys ---
@@ -115,26 +127,28 @@ func (db *DB) CreateDeploy(d *Deploy) error {
 	d.StartedAt = time.Now()
 
 	_, err := db.conn.Exec(
-		`INSERT INTO deploys (id, project_id, status, commit_hash, commit_message, commit_author, started_at, exit_code, log_path)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.ProjectID, d.Status, d.CommitHash, d.CommitMessage, d.CommitAuthor, d.StartedAt, d.ExitCode, d.LogPath,
+		`INSERT INTO deploys (id, project_id, status, commit_hash, commit_message, commit_author, started_at, exit_code, log_path, output_path, framework, is_backend, build_duration)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ProjectID, d.Status, d.CommitHash, d.CommitMessage, d.CommitAuthor, d.StartedAt, d.ExitCode, d.LogPath, d.OutputPath, d.Framework, boolToInt(d.IsBackend), d.BuildDuration,
 	)
 	return err
 }
 
 func (db *DB) UpdateDeploy(d *Deploy) error {
 	_, err := db.conn.Exec(
-		`UPDATE deploys SET status=?, commit_hash=?, commit_message=?, commit_author=?, ended_at=?, exit_code=?, log_path=? WHERE id=?`,
-		d.Status, d.CommitHash, d.CommitMessage, d.CommitAuthor, d.EndedAt, d.ExitCode, d.LogPath, d.ID,
+		`UPDATE deploys SET status=?, commit_hash=?, commit_message=?, commit_author=?, ended_at=?, exit_code=?, log_path=?, output_path=?, framework=?, is_backend=?, build_duration=? WHERE id=?`,
+		d.Status, d.CommitHash, d.CommitMessage, d.CommitAuthor, d.EndedAt, d.ExitCode, d.LogPath, d.OutputPath, d.Framework, boolToInt(d.IsBackend), d.BuildDuration, d.ID,
 	)
 	return err
 }
 
 func (db *DB) GetDeploy(id string) (*Deploy, error) {
 	d := &Deploy{}
+	var isBackend int
 	err := db.conn.QueryRow(
-		"SELECT id, project_id, status, commit_hash, commit_message, commit_author, started_at, ended_at, exit_code, log_path FROM deploys WHERE id = ?", id,
-	).Scan(&d.ID, &d.ProjectID, &d.Status, &d.CommitHash, &d.CommitMessage, &d.CommitAuthor, &d.StartedAt, &d.EndedAt, &d.ExitCode, &d.LogPath)
+		"SELECT id, project_id, status, commit_hash, commit_message, commit_author, started_at, ended_at, exit_code, log_path, output_path, framework, is_backend, build_duration FROM deploys WHERE id = ?", id,
+	).Scan(&d.ID, &d.ProjectID, &d.Status, &d.CommitHash, &d.CommitMessage, &d.CommitAuthor, &d.StartedAt, &d.EndedAt, &d.ExitCode, &d.LogPath, &d.OutputPath, &d.Framework, &isBackend, &d.BuildDuration)
+	d.IsBackend = isBackend == 1
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -143,7 +157,7 @@ func (db *DB) GetDeploy(id string) (*Deploy, error) {
 
 func (db *DB) ListDeploysByProject(projectID string) ([]Deploy, error) {
 	rows, err := db.conn.Query(
-		"SELECT id, project_id, status, commit_hash, commit_message, commit_author, started_at, ended_at, exit_code, log_path FROM deploys WHERE project_id = ? ORDER BY started_at DESC", projectID,
+		"SELECT id, project_id, status, commit_hash, commit_message, commit_author, started_at, ended_at, exit_code, log_path, output_path, framework, is_backend, build_duration FROM deploys WHERE project_id = ? ORDER BY started_at DESC", projectID,
 	)
 	if err != nil {
 		return nil, err
@@ -153,9 +167,36 @@ func (db *DB) ListDeploysByProject(projectID string) ([]Deploy, error) {
 	var deploys []Deploy
 	for rows.Next() {
 		var d Deploy
-		if err := rows.Scan(&d.ID, &d.ProjectID, &d.Status, &d.CommitHash, &d.CommitMessage, &d.CommitAuthor, &d.StartedAt, &d.EndedAt, &d.ExitCode, &d.LogPath); err != nil {
+		var isBackend int
+		if err := rows.Scan(&d.ID, &d.ProjectID, &d.Status, &d.CommitHash, &d.CommitMessage, &d.CommitAuthor, &d.StartedAt, &d.EndedAt, &d.ExitCode, &d.LogPath, &d.OutputPath, &d.Framework, &isBackend, &d.BuildDuration); err != nil {
 			return nil, err
 		}
+		d.IsBackend = isBackend == 1
+		deploys = append(deploys, d)
+	}
+	return deploys, rows.Err()
+}
+
+// ListStaleRunningDeploys returns deploys stuck in "running" status older than the given duration
+func (db *DB) ListStaleRunningDeploys(olderThan time.Duration) ([]Deploy, error) {
+	cutoff := time.Now().Add(-olderThan)
+	rows, err := db.conn.Query(
+		"SELECT id, project_id, status, commit_hash, commit_message, commit_author, started_at, ended_at, exit_code, log_path, output_path, framework, is_backend, build_duration FROM deploys WHERE status = 'running' AND started_at < ? ORDER BY started_at ASC",
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var deploys []Deploy
+	for rows.Next() {
+		var d Deploy
+		var isBackend int
+		if err := rows.Scan(&d.ID, &d.ProjectID, &d.Status, &d.CommitHash, &d.CommitMessage, &d.CommitAuthor, &d.StartedAt, &d.EndedAt, &d.ExitCode, &d.LogPath, &d.OutputPath, &d.Framework, &isBackend, &d.BuildDuration); err != nil {
+			return nil, err
+		}
+		d.IsBackend = isBackend == 1
 		deploys = append(deploys, d)
 	}
 	return deploys, rows.Err()
@@ -563,6 +604,159 @@ func (db *DB) UpdateTunnelRouteSortOrder(id string, sortOrder int) error {
 		`UPDATE tunnel_routes SET sort_order=?, updated_at=? WHERE id=?`,
 		sortOrder, time.Now(), id,
 	)
+	return err
+}
+
+// --- Containers ---
+
+func (db *DB) CreateContainer(c *Container) error {
+	if c.ID == "" {
+		c.ID = uuid.New().String()
+	}
+	now := time.Now()
+	c.CreatedAt = now
+	c.UpdatedAt = now
+
+	_, err := db.conn.Exec(
+		`INSERT INTO containers (id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.ProjectID, c.Name, c.Image, c.ContainerID, c.Status, c.PortMappings, c.CreatedAt, c.UpdatedAt,
+	)
+	return err
+}
+
+func (db *DB) GetContainer(id string) (*Container, error) {
+	c := &Container{}
+	err := db.conn.QueryRow(
+		"SELECT id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at FROM containers WHERE id = ?", id,
+	).Scan(&c.ID, &c.ProjectID, &c.Name, &c.Image, &c.ContainerID, &c.Status, &c.PortMappings, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
+func (db *DB) GetContainerByProjectID(projectID string) (*Container, error) {
+	c := &Container{}
+	err := db.conn.QueryRow(
+		"SELECT id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at FROM containers WHERE project_id = ? ORDER BY created_at DESC LIMIT 1", projectID,
+	).Scan(&c.ID, &c.ProjectID, &c.Name, &c.Image, &c.ContainerID, &c.Status, &c.PortMappings, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
+func (db *DB) ListContainersByProject(projectID string) ([]Container, error) {
+	query := "SELECT id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at FROM containers"
+	args := []interface{}{}
+
+	if projectID != "" {
+		query += " WHERE project_id = ?"
+		args = append(args, projectID)
+	}
+	query += " ORDER BY created_at DESC"
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var containers []Container
+	for rows.Next() {
+		var c Container
+		if err := rows.Scan(&c.ID, &c.ProjectID, &c.Name, &c.Image, &c.ContainerID, &c.Status, &c.PortMappings, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		containers = append(containers, c)
+	}
+	return containers, rows.Err()
+}
+
+func (db *DB) UpdateContainer(c *Container) error {
+	c.UpdatedAt = time.Now()
+	_, err := db.conn.Exec(
+		`UPDATE containers SET name=?, image=?, container_id=?, status=?, port_mappings=?, updated_at=? WHERE id=?`,
+		c.Name, c.Image, c.ContainerID, c.Status, c.PortMappings, c.UpdatedAt, c.ID,
+	)
+	return err
+}
+
+func (db *DB) DeleteContainer(id string) error {
+	_, err := db.conn.Exec("DELETE FROM containers WHERE id = ?", id)
+	return err
+}
+
+func (db *DB) DeleteContainersByProject(projectID string) error {
+	_, err := db.conn.Exec("DELETE FROM containers WHERE project_id = ?", projectID)
+	return err
+}
+
+// --- Deploy Logs ---
+
+func (db *DB) CreateDeployLog(l *DeployLog) error {
+	if l.ID == "" {
+		l.ID = uuid.New().String()
+	}
+	if l.LogTimestamp.IsZero() {
+		l.LogTimestamp = time.Now()
+	}
+
+	_, err := db.conn.Exec(
+		`INSERT INTO deploy_logs (id, deploy_id, log_timestamp, stream, message) VALUES (?, ?, ?, ?, ?)`,
+		l.ID, l.DeployID, l.LogTimestamp, l.Stream, l.Message,
+	)
+	return err
+}
+
+func (db *DB) ListDeployLogs(deployID string, limit int, offset int) ([]DeployLog, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := db.conn.Query(
+		"SELECT id, deploy_id, log_timestamp, stream, message FROM deploy_logs WHERE deploy_id = ? ORDER BY log_timestamp ASC LIMIT ? OFFSET ?",
+		deployID, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []DeployLog
+	for rows.Next() {
+		var l DeployLog
+		if err := rows.Scan(&l.ID, &l.DeployID, &l.LogTimestamp, &l.Stream, &l.Message); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
+func (db *DB) GetDeployLogsAfter(deployID string, after time.Time) ([]DeployLog, error) {
+	rows, err := db.conn.Query(
+		"SELECT id, deploy_id, log_timestamp, stream, message FROM deploy_logs WHERE deploy_id = ? AND log_timestamp > ? ORDER BY log_timestamp ASC",
+		deployID, after,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []DeployLog
+	for rows.Next() {
+		var l DeployLog
+		if err := rows.Scan(&l.ID, &l.DeployID, &l.LogTimestamp, &l.Stream, &l.Message); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
+func (db *DB) DeleteDeployLogs(deployID string) error {
+	_, err := db.conn.Exec("DELETE FROM deploy_logs WHERE deploy_id = ?", deployID)
 	return err
 }
 
