@@ -37,11 +37,14 @@ type DeployConfig struct {
 	NodeBinary          string        `yaml:"node_binary"`
 	NpmBinary           string        `yaml:"npm_binary"`
 	PythonBinary        string        `yaml:"python_binary"`
+	GoBinary            string        `yaml:"go_binary"`
 	DockerBinary        string        `yaml:"docker_binary"`
 	DockerEnabled       bool          `yaml:"docker_enabled"`
 	DockerMemoryLimit   string        `yaml:"docker_memory_limit"`
 	DockerCPULimit      string        `yaml:"docker_cpu_limit"`
 	OutputRoot          string        `yaml:"output_root"`
+	PortPoolStart       int           `yaml:"port_pool_start"`
+	PortPoolEnd         int           `yaml:"port_pool_end"`
 }
 
 type NginxConfig struct {
@@ -121,6 +124,9 @@ func (c *Config) applyDefaults() {
 	if c.Deploy.PythonBinary == "" {
 		c.Deploy.PythonBinary = "/usr/bin/python3"
 	}
+	if c.Deploy.GoBinary == "" {
+		c.Deploy.GoBinary = "/usr/local/go/bin/go"
+	}
 	if c.Deploy.DockerBinary == "" {
 		c.Deploy.DockerBinary = "/usr/bin/docker"
 	}
@@ -132,6 +138,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Deploy.OutputRoot == "" {
 		c.Deploy.OutputRoot = "/var/www/opendeploy"
+	}
+	if c.Deploy.PortPoolStart == 0 {
+		c.Deploy.PortPoolStart = 8000
+	}
+	if c.Deploy.PortPoolEnd == 0 {
+		c.Deploy.PortPoolEnd = 9000
 	}
 	if c.Nginx.SitesAvailable == "" {
 		c.Nginx.SitesAvailable = "/etc/nginx/sites-available"
