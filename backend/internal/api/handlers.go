@@ -677,6 +677,17 @@ func (h *deployHandlers) createProject(w http.ResponseWriter, r *http.Request) {
 		p.EnvVars = "{}"
 	}
 
+	// Check for existing project with same repo URL and branch
+	existing, err := h.db.GetProjectByRepoAndBranch(p.RepoURL, p.Branch)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing != nil {
+		respondError(w, http.StatusConflict, "A project with this repository URL and branch already exists. Please use the existing project or delete it first.")
+		return
+	}
+
 	if err := h.db.CreateProject(&p); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -746,7 +757,31 @@ func (h *deployHandlers) triggerDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployID, err := h.service.Deploy(r.Context(), p)
+	// Parse optional deploy options from request body
+	var opts *services.DeployOptions
+	if r.ContentLength > 0 {
+		var body struct {
+			Domain       string `json:"domain"`
+			ZoneID       string `json:"zone_id"`
+			ManualDomain bool   `json:"manual_domain"`
+			EnableNginx  *bool  `json:"enable_nginx"`
+		}
+		if err := parseBody(r, &body); err == nil {
+			opts = &services.DeployOptions{
+				Domain:       body.Domain,
+				ZoneID:       body.ZoneID,
+				ManualDomain: body.ManualDomain,
+			}
+			// Default enable_nginx to true when domain is provided
+			if body.EnableNginx != nil {
+				opts.EnableNginx = *body.EnableNginx
+			} else if body.Domain != "" {
+				opts.EnableNginx = true
+			}
+		}
+	}
+
+	deployID, err := h.service.DeployWithOptions(r.Context(), p, opts)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -768,7 +803,38 @@ func (h *deployHandlers) listDeploys(w http.ResponseWriter, r *http.Request) {
 	if deploys == nil {
 		deploys = []state.Deploy{}
 	}
-	respondOK(w, deploys)
+
+	// Enrich with container port mappings for backend deploys
+	response := make([]map[string]interface{}, len(deploys))
+	for i, d := range deploys {
+		deployMap := map[string]interface{}{
+			"id":             d.ID,
+			"project_id":     d.ProjectID,
+			"status":         d.Status,
+			"commit_hash":    d.CommitHash,
+			"commit_message": d.CommitMessage,
+			"commit_author":  d.CommitAuthor,
+			"started_at":     d.StartedAt,
+			"ended_at":       d.EndedAt,
+			"exit_code":      d.ExitCode,
+			"log_path":       d.LogPath,
+			"output_path":    d.OutputPath,
+			"framework":      d.Framework,
+			"is_backend":     d.IsBackend,
+			"build_duration": d.BuildDuration,
+		}
+
+		if d.IsBackend {
+			container, err := h.db.GetContainerByProjectID(d.ProjectID)
+			if err == nil && container != nil {
+				deployMap["port_mappings"] = container.PortMappings
+			}
+		}
+
+		response[i] = deployMap
+	}
+
+	respondOK(w, response)
 }
 
 func (h *deployHandlers) getDeploy(w http.ResponseWriter, r *http.Request) {
@@ -782,7 +848,53 @@ func (h *deployHandlers) getDeploy(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "deploy not found")
 		return
 	}
-	respondOK(w, d)
+
+	// Enrich with container port mapping if backend
+	response := map[string]interface{}{
+		"id":             d.ID,
+		"project_id":     d.ProjectID,
+		"status":         d.Status,
+		"commit_hash":    d.CommitHash,
+		"commit_message": d.CommitMessage,
+		"commit_author":  d.CommitAuthor,
+		"started_at":     d.StartedAt,
+		"ended_at":       d.EndedAt,
+		"exit_code":      d.ExitCode,
+		"log_path":       d.LogPath,
+		"output_path":    d.OutputPath,
+		"framework":      d.Framework,
+		"is_backend":     d.IsBackend,
+		"build_duration": d.BuildDuration,
+	}
+
+	if d.IsBackend {
+		container, err := h.db.GetContainerByProjectID(d.ProjectID)
+		if err == nil && container != nil {
+			response["port_mappings"] = container.PortMappings
+		}
+	}
+
+	respondOK(w, response)
+}
+
+func (h *deployHandlers) rebuildProject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	p, err := h.db.GetProject(id)
+	if err != nil || p == nil {
+		respondError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	deployID, err := h.service.Rebuild(r.Context(), p)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusAccepted, map[string]string{
+		"deploy_id": deployID,
+		"status":    "rebuilding",
+	})
 }
 
 // --- Nginx handlers ---
@@ -1330,4 +1442,145 @@ func (h *envHandlers) bulkImport(w http.ResponseWriter, r *http.Request) {
 		"status":   "imported",
 		"imported": count,
 	})
+}
+
+// --- Container handlers ---
+
+type containerHandlers struct {
+	service *services.ContainerService
+	db      *state.DB
+}
+
+func (h *containerHandlers) listContainers(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+	containers, err := h.service.ListContainers(projectID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if containers == nil {
+		containers = []state.Container{}
+	}
+	respondOK(w, containers)
+}
+
+func (h *containerHandlers) startContainer(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	if err := h.service.RestartContainer(r.Context(), projectID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "started"})
+}
+
+func (h *containerHandlers) stopContainer(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+
+	if err := h.service.StopContainer(r.Context(), projectID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "stopped"})
+}
+
+func (h *containerHandlers) restartContainer(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+
+	if err := h.service.RestartContainer(r.Context(), projectID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "restarted"})
+}
+
+func (h *containerHandlers) removeContainer(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "id")
+
+	if err := h.service.RemoveContainer(r.Context(), projectID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "removed"})
+}
+
+func (h *containerHandlers) getContainerLogs(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+	lines := 100
+	if q := r.URL.Query().Get("lines"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			lines = n
+		}
+	}
+
+	logs, err := h.service.GetContainerLogs(r.Context(), containerID, lines)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]interface{}{
+		"logs": logs,
+	})
+}
+
+// --- Deploy Log handlers ---
+
+type deployLogHandlers struct {
+	db *state.DB
+}
+
+func (h *deployLogHandlers) getDeployLogs(w http.ResponseWriter, r *http.Request) {
+	deployID := chi.URLParam(r, "deployId")
+	limit := 1000
+	offset := 0
+
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			limit = n
+		}
+	}
+	if q := r.URL.Query().Get("offset"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			offset = n
+		}
+	}
+
+	logs, err := h.db.ListDeployLogs(deployID, limit, offset)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if logs == nil {
+		logs = []state.DeployLog{}
+	}
+
+	respondOK(w, logs)
+}
+
+// --- Cleanup handlers ---
+
+type cleanupHandlers struct {
+	service *services.CleanupService
+}
+
+func (h *cleanupHandlers) runCleanup(w http.ResponseWriter, r *http.Request) {
+	report := h.service.RunFullCleanup(r.Context())
+	respondOK(w, report)
+}
+
+func (h *cleanupHandlers) getCleanupStatus(w http.ResponseWriter, r *http.Request) {
+	report := h.service.GetOrphanReport(r.Context())
+	respondOK(w, report)
 }
