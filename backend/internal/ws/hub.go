@@ -127,9 +127,10 @@ func (h *Hub) BroadcastAll(msg interface{}) {
 // HandleClientMessage processes incoming WebSocket messages from clients.
 func (h *Hub) HandleClientMessage(clientID string, raw []byte) {
 	var msg struct {
-		Type    string `json:"type"`
-		JobID   string `json:"jobId,omitempty"`
-		Service string `json:"service,omitempty"`
+		Type     string `json:"type"`
+		JobID    string `json:"jobId,omitempty"`
+		DeployID string `json:"deployId,omitempty"`
+		Service  string `json:"service,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		h.logger.Warn("invalid ws message", zap.Error(err))
@@ -143,6 +144,14 @@ func (h *Hub) HandleClientMessage(clientID string, raw []byte) {
 			h.logger.Debug("client subscribed to job",
 				zap.String("clientId", clientID),
 				zap.String("jobId", msg.JobID),
+			)
+		}
+	case "subscribe_deploy":
+		if msg.DeployID != "" {
+			h.SubscribeToJob(clientID, msg.DeployID)
+			h.logger.Debug("client subscribed to deploy",
+				zap.String("clientId", clientID),
+				zap.String("deployId", msg.DeployID),
 			)
 		}
 	case "cancel_job":

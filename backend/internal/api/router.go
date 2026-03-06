@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -18,7 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runner, logger *zap.Logger) http.Handler {
+func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runner, logger *zap.Logger, wifiMonitor *services.WifiMonitor) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -45,6 +47,26 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	nginxSvc := services.NewNginxService(runner, cfg.Nginx, logger)
 	systemSvc := services.NewSystemService(runner, logger)
 	internetSvc := services.NewInternetService(runner, logger)
+	containerSvc := services.NewContainerService(runner, db, cfg.Deploy, logger)
+	cleanupSvc := services.NewCleanupService(runner, db, cfg.Deploy, logger)
+
+	// Connect services to deploy service
+	deploySvc.SetNginxService(nginxSvc)
+	deploySvc.SetContainerService(containerSvc)
+	deploySvc.SetWifiMonitor(wifiMonitor)
+
+	// Run startup cleanup: fix stale deployments and orphan containers
+	go func() {
+		startupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		report := cleanupSvc.RunFullCleanup(startupCtx)
+		if report.StaleDeploysFixed > 0 || report.OrphanContainersRemoved > 0 {
+			logger.Info("startup cleanup completed",
+				zap.Int("staleDeploysFixed", report.StaleDeploysFixed),
+				zap.Int("orphanContainersRemoved", report.OrphanContainersRemoved),
+			)
+		}
+	}()
 
 	// Initialize handlers
 	authH := &authHandlers{auth: a}
@@ -57,6 +79,10 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	jobH := &jobHandlers{db: db, runner: runner}
 	envH := &envHandlers{db: db}
 	internetH := &internetHandlers{service: internetSvc}
+	containerH := &containerHandlers{service: containerSvc, db: db}
+	deployLogH := &deployLogHandlers{db: db}
+	sseH := &sseHandlers{db: db, logger: logger}
+	cleanupH := &cleanupHandlers{service: cleanupSvc}
 
 	// Public routes (no auth required)
 	r.Route("/api/v1/auth", func(r chi.Router) {
@@ -120,6 +146,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 		r.Put("/projects/{id}", deployH.updateProject)
 		r.Delete("/projects/{id}", deployH.deleteProject)
 		r.Post("/projects/{id}/deploy", deployH.triggerDeploy)
+		r.Post("/projects/{id}/rebuild", deployH.rebuildProject)
 		r.Get("/projects/{id}/deploys", deployH.listDeploys)
 		r.Get("/deploys/{deployId}", deployH.getDeploy)
 
@@ -164,6 +191,23 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 		r.Post("/projects/{id}/env/bulk", envH.bulkImport)
 		r.Put("/env/{envId}", envH.updateEnvVar)
 		r.Delete("/env/{envId}", envH.deleteEnvVar)
+
+		// Containers
+		r.Get("/projects/{id}/containers", containerH.listContainers)
+		r.Post("/projects/{id}/containers/{containerId}/start", containerH.startContainer)
+		r.Post("/projects/{id}/containers/stop", containerH.stopContainer)
+		r.Post("/projects/{id}/containers/restart", containerH.restartContainer)
+		r.Delete("/projects/{id}/containers", containerH.removeContainer)
+		r.Get("/containers/{containerId}/logs", containerH.getContainerLogs)
+
+		// Deploy Logs
+		r.Get("/deploys/{deployId}/logs", deployLogH.getDeployLogs)
+		r.Get("/deploys/{deployId}/logs/stream", sseH.streamDeployLogs)
+		r.Get("/deploys/{deployId}/logs/poll", sseH.longPollDeployLogs)
+
+		// System Cleanup
+		r.Post("/system/cleanup", cleanupH.runCleanup)
+		r.Get("/system/cleanup/status", cleanupH.getCleanupStatus)
 
 		// Internet Checks
 		r.Get("/internet/check", internetH.runChecks)

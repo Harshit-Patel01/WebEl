@@ -51,7 +51,7 @@ func (db *DB) runMigrations() error {
 	}
 
 	// Run migrations sequentially
-	migrations := []string{migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008}
+	migrations := []string{migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012}
 
 	for i, m := range migrations {
 		version := i + 1
@@ -249,4 +249,62 @@ const migration008 = `
 ALTER TABLE tunnel_config ADD COLUMN status TEXT DEFAULT 'inactive';
 
 INSERT OR REPLACE INTO schema_version (version) VALUES (8);
+`
+
+const migration009 = `
+-- Add working_directory to projects table
+ALTER TABLE projects ADD COLUMN working_directory TEXT DEFAULT '';
+
+-- Create containers table for Docker container management
+CREATE TABLE IF NOT EXISTS containers (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	image TEXT NOT NULL,
+	container_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'stopped',
+	port_mappings TEXT DEFAULT '{}',
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_containers_project_id ON containers(project_id);
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (9);
+`
+
+const migration010 = `
+-- Create deploy_logs table for storing deployment logs
+CREATE TABLE IF NOT EXISTS deploy_logs (
+	id TEXT PRIMARY KEY,
+	deploy_id TEXT NOT NULL,
+	log_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+	stream TEXT NOT NULL,
+	message TEXT NOT NULL,
+	FOREIGN KEY (deploy_id) REFERENCES deploys(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_deploy_logs_deploy_id ON deploy_logs(deploy_id);
+CREATE INDEX IF NOT EXISTS idx_deploy_logs_timestamp ON deploy_logs(deploy_id, log_timestamp);
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (10);
+`
+
+const migration011 = `
+-- Add install_command and start_command columns to projects table
+ALTER TABLE projects ADD COLUMN install_command TEXT;
+ALTER TABLE projects ADD COLUMN start_command TEXT;
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (11);
+`
+
+const migration012 = `
+-- Add output_path, framework, is_backend, build_duration columns to deploys table
+ALTER TABLE deploys ADD COLUMN output_path TEXT DEFAULT '';
+ALTER TABLE deploys ADD COLUMN framework TEXT DEFAULT '';
+ALTER TABLE deploys ADD COLUMN is_backend INTEGER DEFAULT 0;
+ALTER TABLE deploys ADD COLUMN build_duration REAL DEFAULT 0;
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (12);
 `
