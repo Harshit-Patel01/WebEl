@@ -15,6 +15,13 @@ deploy:
   node_binary: "/usr/bin/node"
   npm_binary: "/usr/bin/npm"
   python_binary: "/usr/bin/python3"
+  docker_binary: "/usr/bin/docker"
+  docker_enabled: true
+  docker_memory_limit: "4096m"
+  docker_cpu_limit: "1.0"
+  output_root: "/var/www/opendeploy"
+  port_pool_start: 8000
+  port_pool_end: 9000
 
 nginx:
   sites_available: "/etc/nginx/sites-available"
@@ -35,4 +42,4 @@ logging:
 security:
   session_duration: 24h
   bcrypt_cost: 12
-  lan_only: true
+  lan_only: false
