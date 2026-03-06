@@ -9,17 +9,20 @@ type SetupState struct {
 }
 
 type Project struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	RepoURL      string    `json:"repo_url"`
-	Branch       string    `json:"branch"`
-	ProjectType  string    `json:"project_type"`
-	BuildCommand string    `json:"build_command"`
-	OutputDir    string    `json:"output_dir"`
-	LocalPort    int       `json:"local_port,omitempty"`
-	EnvVars      string    `json:"env_vars"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	RepoURL          string    `json:"repo_url"`
+	Branch           string    `json:"branch"`
+	ProjectType      string    `json:"project_type"`
+	BuildCommand     string    `json:"build_command"`
+	InstallCommand   *string   `json:"install_command,omitempty"`
+	StartCommand     *string   `json:"start_command,omitempty"`
+	OutputDir        string    `json:"output_dir"`
+	WorkingDirectory string    `json:"working_directory,omitempty"`
+	LocalPort        int       `json:"local_port,omitempty"`
+	EnvVars          string    `json:"env_vars"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type Deploy struct {
@@ -33,6 +36,10 @@ type Deploy struct {
 	EndedAt       *time.Time `json:"ended_at,omitempty"`
 	ExitCode      int        `json:"exit_code"`
 	LogPath       string     `json:"log_path,omitempty"`
+	OutputPath    string     `json:"output_path,omitempty"`
+	Framework     string     `json:"framework,omitempty"`
+	IsBackend     bool       `json:"is_backend"`
+	BuildDuration float64    `json:"build_duration,omitempty"`
 }
 
 type NginxSite struct {
@@ -104,4 +111,24 @@ type TunnelRoute struct {
 	SortOrder    int       `json:"sort_order"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type Container struct {
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Name         string    `json:"name"`
+	Image        string    `json:"image"`
+	ContainerID  string    `json:"container_id"`
+	Status       string    `json:"status"`
+	PortMappings string    `json:"port_mappings"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type DeployLog struct {
+	ID           string    `json:"id"`
+	DeployID     string    `json:"deploy_id"`
+	LogTimestamp time.Time `json:"timestamp"`
+	Stream       string    `json:"stream"`
+	Message      string    `json:"message"`
 }
