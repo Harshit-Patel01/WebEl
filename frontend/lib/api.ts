@@ -204,11 +204,44 @@ export const deployApi = {
   deleteProject: (id: string) => fetchApi<{ status: string }>(`/projects/${id}`, {
     method: 'DELETE',
   }),
-  triggerDeploy: (projectId: string) => fetchApi<{ deploy_id: string; status: string }>(`/projects/${projectId}/deploy`, {
+  triggerDeploy: (projectId: string, options?: {
+    domain?: string;
+    zone_id?: string;
+    manual_domain?: boolean;
+    enable_nginx?: boolean;
+  }) => fetchApi<{ deploy_id: string; status: string }>(`/projects/${projectId}/deploy`, {
+    method: 'POST',
+    body: options ? JSON.stringify(options) : undefined,
+  }),
+  rebuildProject: (projectId: string) => fetchApi<{ deploy_id: string; status: string }>(`/projects/${projectId}/rebuild`, {
     method: 'POST',
   }),
   listDeploys: (projectId: string) => fetchApi<any[]>(`/projects/${projectId}/deploys`),
   getDeploy: (deployId: string) => fetchApi<any>(`/deploys/${deployId}`),
+  getDeployLogs: (deployId: string) => fetchApi<any[]>(`/deploys/${deployId}/logs`),
+  // SSE stream URL (not a fetch, used with EventSource)
+  getDeployLogStreamUrl: (deployId: string) => `${API_PREFIX}/deploys/${deployId}/logs/stream`,
+  // Long-poll endpoint
+  pollDeployLogs: (deployId: string, after?: string) => {
+    const params = after ? `?after=${encodeURIComponent(after)}` : ''
+    return fetchApi<any[]>(`/deploys/${deployId}/logs/poll${params}`)
+  },
+}
+
+// System Cleanup API
+export const cleanupApi = {
+  runCleanup: () => fetchApi<{
+    orphan_containers_removed: number
+    dangling_images_removed: number
+    stale_deploys_fixed: number
+    errors: string[]
+  }>('/system/cleanup', { method: 'POST' }),
+  getStatus: () => fetchApi<{
+    orphan_containers_removed: number
+    dangling_images_removed: number
+    stale_deploys_fixed: number
+    errors: string[]
+  }>('/system/cleanup/status'),
 }
 
 // Nginx API
