@@ -43,11 +43,12 @@ func (a *AvahiService) EnsureOptimalConfig(ctx context.Context) error {
 	requiredSettings := []string{
 		"use-ipv4=yes",
 		"use-ipv6=no",
-		"allow-interfaces=wlan0",
+		"deny-interfaces=lo",
 		"publish-addresses=yes",
 		"publish-hinfo=yes",
 		"publish-workstation=yes",
 		"publish-domain=yes",
+		"enable-dbus=yes",
 	}
 
 	for _, setting := range requiredSettings {
@@ -81,9 +82,15 @@ func (a *AvahiService) writeOptimalConfig(ctx context.Context, configPath string
 [server]
 use-ipv4=yes
 use-ipv6=no
-allow-interfaces=wlan0
+# Allow all interfaces to handle both WiFi and hotspot mode
+#allow-interfaces=wlan0
+deny-interfaces=lo
 ratelimit-interval-usec=1000000
 ratelimit-burst=1000
+# Enable address change detection for network switches
+enable-dbus=yes
+# Disable caching to ensure fresh announcements
+disallow-other-stacks=yes
 
 [wide-area]
 enable-wide-area=yes
@@ -93,9 +100,12 @@ publish-addresses=yes
 publish-hinfo=yes
 publish-workstation=yes
 publish-domain=yes
+# Publish A and AAAA records
+publish-a-on-ipv6=no
+publish-aaaa-on-ipv4=no
 
 [reflector]
-#enable-reflector=no
+enable-reflector=no
 
 [rlimits]
 #rlimit-core=0
@@ -157,20 +167,41 @@ func (a *AvahiService) Restart(ctx context.Context) error {
 		JobType: "restart_avahi",
 		Command: "sudo",
 		Args:    []string{"systemctl", "restart", "avahi-daemon"},
-		Timeout: 10 * time.Second,
+		Timeout: 15 * time.Second,
 	})
 	if err != nil || !result.Success {
 		a.logger.Error("Failed to restart Avahi daemon", zap.Error(err))
 		return fmt.Errorf("restarting avahi: %w", err)
 	}
 
-	// Wait for Avahi to start broadcasting on the new network
-	time.Sleep(2 * time.Second)
+	// Wait longer for Avahi to fully initialize and start broadcasting
+	time.Sleep(5 * time.Second)
 
 	// Verify it's actually running
 	isActive, _ := a.CheckStatus(ctx)
 	if isActive {
-		a.logger.Info("Avahi daemon restarted successfully - hostname should now be accessible")
+		// Get the hostname to inform the user
+		hostnameResult, _ := a.runner.Run(ctx, exec.RunOpts{
+			JobType: "get_hostname",
+			Command: "hostname",
+			Args:    []string{},
+			Timeout: 5 * time.Second,
+		})
+
+		hostname := "unknown"
+		if hostnameResult != nil && hostnameResult.Success && len(hostnameResult.Lines) > 0 {
+			for _, line := range hostnameResult.Lines {
+				if line.Stream == "stdout" && line.Text != "" {
+					hostname = line.Text
+					break
+				}
+			}
+		}
+
+		a.logger.Info("Avahi daemon restarted successfully",
+			zap.String("hostname", hostname+".local"),
+			zap.String("message", "Device should be accessible via "+hostname+".local"),
+		)
 	} else {
 		a.logger.Warn("Avahi daemon restart completed but service is not active")
 	}

@@ -3,8 +3,9 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from 'react'
 
 export interface WSMessage {
-  type: 'system_stats' | 'service_update' | 'tunnel_event' | 'wifi_event' | 'log_line' | 'progress' | 'job_complete' | 'job_failed'
+  type: 'system_stats' | 'service_update' | 'tunnel_event' | 'wifi_event' | 'log_line' | 'progress' | 'job_complete' | 'job_failed' | 'deploy_log' | 'deploy_complete' | 'job_started'
   jobId?: string
+  deployId?: string
   line?: {
     timestamp: string
     stream: string
@@ -13,6 +14,8 @@ export interface WSMessage {
   }
   percent?: number
   phase?: string
+  message?: string
+  stream?: string
   cpu?: number
   ram?: number
   temp?: number

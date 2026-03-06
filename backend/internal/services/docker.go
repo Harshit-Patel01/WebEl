@@ -74,127 +74,157 @@ func (d *DockerService) fileContains(path, substr string) bool {
 }
 
 // GenerateDockerfile creates a Dockerfile for the given framework.
-func (d *DockerService) GenerateDockerfile(framework FrameworkType, buildCmd, outputDir string) string {
+func (d *DockerService) GenerateDockerfile(framework FrameworkType, installCmd, startCmd string, port int) string {
 	switch framework {
 	case FrameworkNodeExpress:
-		return d.dockerfileNodeExpress(buildCmd)
+		return d.dockerfileNodeExpress(installCmd, startCmd, port)
 	case FrameworkNodeStatic:
-		return d.dockerfileNodeStatic(buildCmd, outputDir)
+		return d.dockerfileNodeStatic(installCmd, startCmd)
 	case FrameworkPythonFastAPI:
-		return d.dockerfilePythonFastAPI()
+		return d.dockerfilePythonFastAPI(installCmd, startCmd, port)
 	case FrameworkPythonDjango:
-		return d.dockerfilePythonDjango()
+		return d.dockerfilePythonDjango(installCmd, startCmd, port)
 	case FrameworkGo:
-		return d.dockerfileGo()
+		return d.dockerfileGo(port)
 	default:
-		return d.dockerfileNodeStatic(buildCmd, outputDir)
+		return d.dockerfileNodeStatic(installCmd, startCmd)
 	}
 }
 
-func (d *DockerService) dockerfileNodeExpress(buildCmd string) string {
-	if buildCmd == "" {
-		buildCmd = "npm run build"
+func (d *DockerService) dockerfileNodeExpress(installCmd, startCmd string, port int) string {
+	if installCmd == "" {
+		installCmd = "npm ci --production=false"
 	}
-	return fmt.Sprintf(`FROM node:20-slim AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --production=false
-COPY . .
-RUN %s || true
-
-FROM node:20-slim
-WORKDIR /app
-COPY --from=builder /app /app
-RUN npm prune --production
-EXPOSE 3000
-CMD ["node", "index.js"]
-`, buildCmd)
-}
-
-func (d *DockerService) dockerfileNodeStatic(buildCmd, outputDir string) string {
-	if buildCmd == "" {
-		buildCmd = "npm run build"
+	if startCmd == "" {
+		startCmd = "npm start"
 	}
-	if outputDir == "" {
-		outputDir = "dist"
+	if port == 0 {
+		port = 3000
 	}
-	return fmt.Sprintf(`FROM node:20-slim AS builder
+	return fmt.Sprintf(`FROM node:20-slim
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
 COPY . .
 RUN %s
-# Build output will be in /app/%s
-`, buildCmd, outputDir)
+EXPOSE %d
+CMD ["/bin/sh", "-c", "%s"]
+`, installCmd, port, startCmd)
 }
 
-func (d *DockerService) dockerfilePythonFastAPI() string {
-	return `FROM python:3.11-slim AS builder
+func (d *DockerService) dockerfileNodeStatic(installCmd, buildCmd string) string {
+	if installCmd == "" {
+		installCmd = "npm ci"
+	}
+	if buildCmd == "" {
+		buildCmd = "npm run build"
+	}
+	return fmt.Sprintf(`FROM node:20-slim AS builder
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --target=/app/deps -r requirements.txt
 COPY . .
-
-FROM python:3.11-slim
-WORKDIR /app
-COPY --from=builder /app /app
-ENV PYTHONPATH=/app/deps
-EXPOSE 8000
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-`
+RUN %s
+RUN %s
+`, installCmd, buildCmd)
 }
 
-func (d *DockerService) dockerfilePythonDjango() string {
-	return `FROM python:3.11-slim AS builder
+func (d *DockerService) dockerfilePythonFastAPI(installCmd, startCmd string, port int) string {
+	if installCmd == "" {
+		installCmd = "pip install --no-cache-dir -r requirements.txt"
+	}
+	if startCmd == "" {
+		startCmd = "uvicorn main:app --host 0.0.0.0 --port 8000"
+	}
+	if port == 0 {
+		port = 8000
+	}
+	return fmt.Sprintf(`FROM python:3.11-slim
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --target=/app/deps -r requirements.txt
 COPY . .
-RUN PYTHONPATH=/app/deps python manage.py collectstatic --noinput || true
-
-FROM python:3.11-slim
-WORKDIR /app
-COPY --from=builder /app /app
-ENV PYTHONPATH=/app/deps
-EXPOSE 8000
-CMD ["python", "-m", "gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "config.wsgi:application"]
-`
+RUN %s
+EXPOSE %d
+CMD ["/bin/sh", "-c", "%s"]
+`, installCmd, port, startCmd)
 }
 
-func (d *DockerService) dockerfileGo() string {
-	return `FROM golang:1.22-alpine AS builder
+func (d *DockerService) dockerfilePythonDjango(installCmd, startCmd string, port int) string {
+	if installCmd == "" {
+		installCmd = "pip install --no-cache-dir -r requirements.txt"
+	}
+	if startCmd == "" {
+		startCmd = "gunicorn --bind 0.0.0.0:8000 --workers 2 config.wsgi:application"
+	}
+	if port == 0 {
+		port = 8000
+	}
+	return fmt.Sprintf(`FROM python:3.11-slim
 WORKDIR /app
-COPY go.mod go.sum ./
+COPY . .
+RUN %s
+RUN python manage.py collectstatic --noinput || true
+EXPOSE %d
+CMD ["/bin/sh", "-c", "%s"]
+`, installCmd, port, startCmd)
+}
+
+func (d *DockerService) dockerfileGo(port int) string {
+	if port == 0 {
+		port = 8080
+	}
+	return fmt.Sprintf(`FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY . .
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /app/server .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server .
 
 FROM alpine:3.19
 WORKDIR /app
 COPY --from=builder /app/server /app/server
 RUN chmod +x /app/server
-EXPOSE 8080
+EXPOSE %d
 CMD ["/app/server"]
-`
+`, port)
 }
 
 // BuildInDocker runs the project build inside a Docker container.
-func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID string, framework FrameworkType, buildCmd, outputDir string, envVars map[string]string) (*exec.ExecResult, error) {
-	projectDir := filepath.Join(d.cfg.WorkspaceRoot, projectID)
+// The Docker build context is the locally-cloned project directory,
+// so Dockerfiles use COPY instead of cloning the repo again.
+func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID string, framework FrameworkType, installCmd, startCmd string, port int, envVars map[string]string, workingDir, outputDir string) (*exec.ExecResult, error) {
 	containerName := fmt.Sprintf("opendeploy-build-%s", projectID)
 
 	// Generate Dockerfile
-	dockerfile := d.GenerateDockerfile(framework, buildCmd, outputDir)
-	dockerfilePath := filepath.Join(projectDir, "Dockerfile.opendeploy")
+	dockerfile := d.GenerateDockerfile(framework, installCmd, startCmd, port)
+
+	// The build context is the locally-cloned project directory.
+	// The code was already cloned to /tmp/<projectID> by the deploy service,
+	// so we just point Docker at it — no need to re-clone inside the container.
+	buildCtxDir := filepath.Join("/tmp", projectID)
+	if workingDir != "" && workingDir != "." {
+		buildCtxDir = filepath.Join(buildCtxDir, workingDir)
+	}
+
+	// Write Dockerfile into the build context
+	dockerfilePath := filepath.Join(buildCtxDir, "Dockerfile.opendeploy")
 	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
 		return nil, fmt.Errorf("writing Dockerfile: %w", err)
 	}
-	defer os.Remove(dockerfilePath)
+	defer os.Remove(dockerfilePath) // Clean up after build
+
+	// Create a .dockerignore if it doesn't exist to skip .git
+	dockerignorePath := filepath.Join(buildCtxDir, ".dockerignore")
+	needCleanupIgnore := false
+	if !fileExists(dockerignorePath) {
+		ignoreContent := ".git\nnode_modules\n__pycache__\n*.pyc\n.env\n"
+		os.WriteFile(dockerignorePath, []byte(ignoreContent), 0644)
+		needCleanupIgnore = true
+	}
+	if needCleanupIgnore {
+		defer os.Remove(dockerignorePath)
+	}
 
 	// Build Docker image
 	imageName := fmt.Sprintf("opendeploy/%s:latest", projectID)
 	buildArgs := []string{
 		"build",
+		"--no-cache",
+		"--progress=plain",
 		"-f", dockerfilePath,
 		"-t", imageName,
 		"--memory", d.cfg.DockerMemoryLimit,
@@ -205,21 +235,23 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 		buildArgs = append(buildArgs, "--build-arg", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	buildArgs = append(buildArgs, projectDir)
+	buildArgs = append(buildArgs, buildCtxDir)
 
 	d.logger.Info("building docker image",
 		zap.String("projectId", projectID),
 		zap.String("framework", string(framework)),
 		zap.String("image", imageName),
+		zap.String("buildContext", buildCtxDir),
 	)
 
 	buildResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:    jobID + "-docker-build",
-		JobType:  "docker_build",
-		Command:  d.cfg.DockerBinary,
-		Args:     buildArgs,
-		MergeEnv: true,
-		Timeout:  d.cfg.BuildTimeout,
+		JobID:          jobID + "-docker-build",
+		BroadcastJobID: jobID,
+		JobType:        "docker_build",
+		Command:        d.cfg.DockerBinary,
+		Args:           buildArgs,
+		MergeEnv:       true,
+		Timeout:        d.cfg.BuildTimeout,
 	})
 	if err != nil || !buildResult.Success {
 		return buildResult, fmt.Errorf("docker build failed")
@@ -230,38 +262,46 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 		if outputDir == "" {
 			outputDir = "dist"
 		}
-		return d.copyStaticOutput(ctx, imageName, containerName, projectID, outputDir, jobID)
+		return d.copyStaticOutput(ctx, imageName, containerName, projectID, outputDir, "", jobID)
 	}
 
-	// For backend apps, copy the full app from the container
-	return d.copyBackendOutput(ctx, imageName, containerName, projectID, framework, jobID)
+	// For backend apps, the image is ready to run as a container
+	// The container will be started separately by the container service
+	d.logger.Info("backend docker image built successfully",
+		zap.String("projectId", projectID),
+		zap.String("image", imageName),
+	)
+
+	return buildResult, nil
 }
 
 // copyStaticOutput extracts built static files from the Docker container.
-func (d *DockerService) copyStaticOutput(ctx context.Context, imageName, containerName, projectID, outputDir, jobID string) (*exec.ExecResult, error) {
+func (d *DockerService) copyStaticOutput(ctx context.Context, imageName, containerName, projectID, outputDir, workingDir, jobID string) (*exec.ExecResult, error) {
 	destDir := filepath.Join(d.cfg.OutputRoot, "frontend", projectID)
 	os.MkdirAll(destDir, 0755)
 
 	// Create temp container
 	createResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:   jobID + "-docker-create",
-		JobType: "docker_create",
-		Command: d.cfg.DockerBinary,
-		Args:    []string{"create", "--name", containerName, imageName},
-		Timeout: 30 * time.Second,
+		JobID:          jobID + "-docker-create",
+		BroadcastJobID: jobID,
+		JobType:        "docker_create",
+		Command:        d.cfg.DockerBinary,
+		Args:           []string{"create", "--name", containerName, imageName},
+		Timeout:        30 * time.Second,
 	})
 	if err != nil || !createResult.Success {
 		return createResult, fmt.Errorf("failed to create container for output copy")
 	}
 
-	// Copy build output
+	// Files are at /app/<outputDir> since we COPY to /app and build there
 	srcPath := fmt.Sprintf("%s:/app/%s/.", containerName, outputDir)
 	copyResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:   jobID + "-docker-cp",
-		JobType: "docker_cp",
-		Command: d.cfg.DockerBinary,
-		Args:    []string{"cp", srcPath, destDir},
-		Timeout: 2 * time.Minute,
+		JobID:          jobID + "-docker-cp",
+		BroadcastJobID: jobID,
+		JobType:        "docker_cp",
+		Command:        d.cfg.DockerBinary,
+		Args:           []string{"cp", srcPath, destDir},
+		Timeout:        2 * time.Minute,
 	})
 
 	// Cleanup container
@@ -286,24 +326,26 @@ func (d *DockerService) copyBackendOutput(ctx context.Context, imageName, contai
 
 	// Create temp container
 	createResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:   jobID + "-docker-create",
-		JobType: "docker_create",
-		Command: d.cfg.DockerBinary,
-		Args:    []string{"create", "--name", containerName, imageName},
-		Timeout: 30 * time.Second,
+		JobID:          jobID + "-docker-create",
+		BroadcastJobID: jobID,
+		JobType:        "docker_create",
+		Command:        d.cfg.DockerBinary,
+		Args:           []string{"create", "--name", containerName, imageName},
+		Timeout:        30 * time.Second,
 	})
 	if err != nil || !createResult.Success {
 		return createResult, fmt.Errorf("failed to create container for output copy")
 	}
 
-	// Copy entire /app directory
+	// Copy entire /app directory (the built app is there since we COPY to /app)
 	srcPath := fmt.Sprintf("%s:/app/.", containerName)
 	copyResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:   jobID + "-docker-cp",
-		JobType: "docker_cp",
-		Command: d.cfg.DockerBinary,
-		Args:    []string{"cp", srcPath, destDir},
-		Timeout: 2 * time.Minute,
+		JobID:          jobID + "-docker-cp",
+		BroadcastJobID: jobID,
+		JobType:        "docker_cp",
+		Command:        d.cfg.DockerBinary,
+		Args:           []string{"cp", srcPath, destDir},
+		Timeout:        2 * time.Minute,
 	})
 
 	// Cleanup container
@@ -365,4 +407,39 @@ func GetDefaultPort(framework FrameworkType) int {
 // IsBackendFramework returns true if the framework is a backend app (needs a service).
 func IsBackendFramework(framework FrameworkType) bool {
 	return framework != FrameworkNodeStatic
+}
+
+// GetDefaultInstallCommand returns the default install command for a framework.
+func GetDefaultInstallCommand(framework FrameworkType) string {
+	switch framework {
+	case FrameworkNodeExpress:
+		return "npm ci --production=false"
+	case FrameworkNodeStatic:
+		return "npm ci"
+	case FrameworkPythonFastAPI, FrameworkPythonDjango:
+		return "pip install --no-cache-dir -r requirements.txt"
+	case FrameworkGo:
+		return "" // Go uses go mod download in Dockerfile
+	default:
+		return ""
+	}
+}
+
+// GetDefaultStartCommand returns the default start command for a framework.
+func GetDefaultStartCommand(framework FrameworkType, port int) string {
+	if port == 0 {
+		port = GetDefaultPort(framework)
+	}
+	switch framework {
+	case FrameworkNodeExpress:
+		return "npm start"
+	case FrameworkPythonFastAPI:
+		return fmt.Sprintf("uvicorn main:app --host 0.0.0.0 --port %d", port)
+	case FrameworkPythonDjango:
+		return fmt.Sprintf("gunicorn --bind 0.0.0.0:%d --workers 2 config.wsgi:application", port)
+	case FrameworkGo:
+		return "/app/server"
+	default:
+		return ""
+	}
 }

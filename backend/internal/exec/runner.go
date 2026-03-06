@@ -48,14 +48,15 @@ type ExecResult struct {
 }
 
 type RunOpts struct {
-	JobID      string
-	JobType    string
-	Command    string
-	Args       []string
-	WorkDir    string
-	Env        map[string]string
-	Timeout    time.Duration
-	MergeEnv   bool // merge with system env
+	JobID          string
+	JobType        string
+	Command        string
+	Args           []string
+	WorkDir        string
+	Env            map[string]string
+	Timeout        time.Duration
+	MergeEnv       bool   // merge with system env
+	BroadcastJobID string // if set, broadcast log_line events to this topic instead of JobID
 }
 
 type Broadcaster interface {
@@ -146,9 +147,15 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 		r.logger.Error("failed to create job record", zap.Error(err))
 	}
 
-	r.broadcaster.BroadcastToJob(opts.JobID, map[string]interface{}{
+	// Determine which topic to broadcast to
+	broadcastID := opts.JobID
+	if opts.BroadcastJobID != "" {
+		broadcastID = opts.BroadcastJobID
+	}
+
+	r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 		"type":    "job_started",
-		"jobId":   opts.JobID,
+		"jobId":   broadcastID,
 		"command": job.Command,
 	})
 
@@ -197,7 +204,7 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 		result.Error = err.Error()
 		result.EndedAt = time.Now()
 		result.Duration = result.EndedAt.Sub(result.StartedAt)
-		r.finalizeJob(job, result, logPath)
+		r.finalizeJob(job, result, logPath, broadcastID)
 		return result, nil
 	}
 
@@ -236,16 +243,16 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 					stream, level, cleaned)
 			}
 
-			r.broadcaster.BroadcastToJob(opts.JobID, map[string]interface{}{
+			r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 				"type":  "log_line",
-				"jobId": opts.JobID,
+				"jobId": broadcastID,
 				"line":  line,
 			})
 
 			if pct, phase, ok := DetectProgress(cleaned); ok {
-				r.broadcaster.BroadcastToJob(opts.JobID, map[string]interface{}{
+				r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 					"type":    "progress",
-					"jobId":   opts.JobID,
+					"jobId":   broadcastID,
 					"percent": pct,
 					"phase":   phase,
 				})
@@ -279,7 +286,7 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 		logFile.Close()
 	}
 
-	r.finalizeJob(job, result, logPath)
+	r.finalizeJob(job, result, logPath, broadcastID)
 
 	return result, nil
 }
@@ -319,10 +326,16 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 		r.logger.Error("failed to create job record", zap.Error(err))
 	}
 
+	// Determine which topic to broadcast to
+	broadcastID := opts.JobID
+	if opts.BroadcastJobID != "" {
+		broadcastID = opts.BroadcastJobID
+	}
+
 	// Broadcast job started
-	r.broadcaster.BroadcastToJob(opts.JobID, map[string]interface{}{
+	r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 		"type":    "job_started",
-		"jobId":   opts.JobID,
+		"jobId":   broadcastID,
 		"command": job.Command,
 	})
 
@@ -373,7 +386,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 		result.Error = err.Error()
 		result.EndedAt = time.Now()
 		result.Duration = result.EndedAt.Sub(result.StartedAt)
-		r.finalizeJob(job, result, logPath)
+		r.finalizeJob(job, result, logPath, broadcastID)
 		return result, nil
 	}
 
@@ -416,18 +429,18 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 					stream, level, cleaned)
 			}
 
-			// Broadcast to WebSocket clients
-			r.broadcaster.BroadcastToJob(opts.JobID, map[string]interface{}{
+			// Broadcast to WebSocket clients (use broadcastID for correct topic routing)
+			r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 				"type":  "log_line",
-				"jobId": opts.JobID,
+				"jobId": broadcastID,
 				"line":  line,
 			})
 
 			// Check for progress
 			if pct, phase, ok := DetectProgress(cleaned); ok {
-				r.broadcaster.BroadcastToJob(opts.JobID, map[string]interface{}{
+				r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 					"type":    "progress",
-					"jobId":   opts.JobID,
+					"jobId":   broadcastID,
 					"percent": pct,
 					"phase":   phase,
 				})
@@ -462,7 +475,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 		logFile.Close()
 	}
 
-	r.finalizeJob(job, result, logPath)
+	r.finalizeJob(job, result, logPath, broadcastID)
 
 	return result, nil
 }
@@ -514,7 +527,7 @@ func (r *Runner) IsJobRunning(jobID string) bool {
 	return ok
 }
 
-func (r *Runner) finalizeJob(job *state.Job, result *ExecResult, logPath string) {
+func (r *Runner) finalizeJob(job *state.Job, result *ExecResult, logPath string, broadcastID string) {
 	now := time.Now()
 	if result.Success {
 		job.Status = "complete"
@@ -529,18 +542,21 @@ func (r *Runner) finalizeJob(job *state.Job, result *ExecResult, logPath string)
 		r.logger.Error("failed to update job record", zap.Error(err))
 	}
 
-	// Broadcast completion
+	// Broadcast completion to the correct topic
+	if broadcastID == "" {
+		broadcastID = result.JobID
+	}
 	if result.Success {
-		r.broadcaster.BroadcastToJob(result.JobID, map[string]interface{}{
+		r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 			"type":     "job_complete",
-			"jobId":    result.JobID,
+			"jobId":    broadcastID,
 			"exitCode": result.ExitCode,
 			"duration": result.Duration.String(),
 		})
 	} else {
-		r.broadcaster.BroadcastToJob(result.JobID, map[string]interface{}{
+		r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 			"type":  "job_failed",
-			"jobId": result.JobID,
+			"jobId": broadcastID,
 			"error": result.Error,
 		})
 	}

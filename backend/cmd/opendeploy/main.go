@@ -97,19 +97,38 @@ func main() {
 	// Start WiFi monitor for fallback AP
 	wifiSvc := services.NewWifiService(runner, logger, db)
 	wifiMonitor := services.NewWifiMonitor(runner, wifiSvc, logger)
+	wifiSvc.SetWifiMonitor(wifiMonitor) // Set the WifiMonitor after both are created
+
+	// Ensure Avahi is configured and running for hostname resolution
+	avahiSvc := services.NewAvahiService(runner, logger)
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := avahiSvc.EnsureOptimalConfig(startupCtx); err != nil {
+		logger.Warn("Failed to configure Avahi at startup", zap.Error(err))
+	}
+	if err := avahiSvc.RefreshHostname(startupCtx); err != nil {
+		logger.Warn("Failed to start Avahi at startup", zap.Error(err))
+	} else {
+		logger.Info("Avahi hostname service initialized - device accessible via hostname.local")
+	}
+	cancelStartup()
+
 	monitorCtx, cancelMonitor := context.WithCancel(context.Background())
 	go wifiMonitor.Start(monitorCtx)
 
 	// Build router
-	router := api.NewRouter(cfg, db, hub, runner, logger)
+	router := api.NewRouter(cfg, db, hub, runner, logger, wifiMonitor)
 
-	// HTTP server
+	// HTTP server — WriteTimeout is set high to support SSE streaming connections
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	sseWriteTimeout := 0 * time.Second // 0 = no timeout for SSE
+	if cfg.Server.WriteTimeout > 0 && cfg.Server.WriteTimeout < 30*time.Minute {
+		sseWriteTimeout = 30 * time.Minute
+	}
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
+		WriteTimeout: sseWriteTimeout,
 	}
 
 	// Graceful shutdown
