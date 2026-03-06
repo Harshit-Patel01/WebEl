@@ -6,22 +6,23 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Wifi, Globe, Shield, GitBranch,
   Server, Activity, Terminal, Settings, HelpCircle,
-  ChevronLeft, ChevronRight, X, Menu,
+  ChevronLeft, ChevronRight, X, Menu, Package,
 } from 'lucide-react'
 import StatusPill from '@/components/ui/StatusPill'
 
 const iconMap: Record<string, React.ElementType> = {
   LayoutDashboard, Wifi, Globe, Shield, GitBranch,
-  Server, Activity, Terminal, Settings, HelpCircle,
+  Server, Activity, Terminal, Settings, HelpCircle, Package,
 }
 
 const mainNav = [
   { label: 'Overview', path: '/dashboard', icon: 'LayoutDashboard' },
   { label: 'WiFi Setup', path: '/wifi', icon: 'Wifi', complete: false},
   { label: 'Internet', path: '/internet', icon: 'Globe', complete: false},
-  { label: 'GitHub Deploy', path: '/deploy', icon: 'GitBranch' },
-  { label: 'Nginx Config', path: '/nginx', icon: 'Server' },
   { label: 'Cloudflare Tunnel', path: '/tunnel/dashboard', icon: 'Shield' },
+  { label: 'GitHub Deploy', path: '/deploy', icon: 'GitBranch' },
+  { label: 'Deployments', path: '/deployments', icon: 'Package' },
+  { label: 'Nginx Config', path: '/nginx', icon: 'Server' },
   { label: 'Logs', path: '/logs', icon: 'Terminal' },
 ]
 
