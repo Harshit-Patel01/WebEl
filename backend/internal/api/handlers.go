@@ -98,8 +98,26 @@ func (h *authHandlers) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *authHandlers) status(w http.ResponseWriter, r *http.Request) {
+	authenticated := false
+	// Check if user has a valid session cookie
+	cookie, err := r.Cookie("opendeploy_session")
+	if err == nil && h.auth.ValidateToken(cookie.Value) {
+		authenticated = true
+	}
+	// Also check Authorization header
+	if !authenticated {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+			if h.auth.ValidateToken(tokenString) {
+				authenticated = true
+			}
+		}
+	}
+
 	respondOK(w, map[string]interface{}{
-		"password_set": h.auth.IsPasswordSet(),
+		"password_set":   h.auth.IsPasswordSet(),
+		"authenticated":  authenticated,
 	})
 }
 
@@ -1583,4 +1601,67 @@ func (h *cleanupHandlers) runCleanup(w http.ResponseWriter, r *http.Request) {
 func (h *cleanupHandlers) getCleanupStatus(w http.ResponseWriter, r *http.Request) {
 	report := h.service.GetOrphanReport(r.Context())
 	respondOK(w, report)
+}
+
+// --- AP (Access Point) handlers ---
+
+type apHandlers struct {
+	service *services.WifiAP
+}
+
+func (h *apHandlers) getStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := h.service.GetStatus(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(w, status)
+}
+
+func (h *apHandlers) getConfig(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.service.GetConfig()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(w, cfg)
+}
+
+func (h *apHandlers) updateConfig(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SSID     string `json:"ssid"`
+		Password string `json:"password"`
+		Channel  int    `json:"channel"`
+	}
+	if err := parseBody(r, &body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.Password != "" && len(body.Password) < 8 {
+		respondError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	if err := h.service.UpdateConfig(r.Context(), body.SSID, body.Password, body.Channel); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(w, map[string]string{"status": "updated"})
+}
+
+func (h *apHandlers) enable(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.EnableAP(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(w, map[string]string{"status": "enabled"})
+}
+
+func (h *apHandlers) disable(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.DisableAP(r.Context()); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(w, map[string]string{"status": "disabled"})
 }

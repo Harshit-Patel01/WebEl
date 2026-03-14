@@ -760,3 +760,37 @@ func (db *DB) DeleteDeployLogs(deployID string) error {
 	return err
 }
 
+// --- AP Config ---
+
+func (db *DB) GetAPConfig() (*APConfig, error) {
+	c := &APConfig{}
+	var enabled int
+	err := db.conn.QueryRow(
+		"SELECT id, ssid, password, enabled, channel, created_at, updated_at FROM ap_config WHERE id = 1",
+	).Scan(&c.ID, &c.SSID, &c.Password, &enabled, &c.Channel, &c.CreatedAt, &c.UpdatedAt)
+	c.Enabled = enabled == 1
+	if err == sql.ErrNoRows {
+		// Return defaults if no row exists
+		return &APConfig{
+			ID:       1,
+			SSID:     "webel",
+			Password: "webel123",
+			Enabled:  true,
+			Channel:  6,
+		}, nil
+	}
+	return c, err
+}
+
+func (db *DB) SaveAPConfig(c *APConfig) error {
+	c.UpdatedAt = time.Now()
+	_, err := db.conn.Exec(
+		`INSERT INTO ap_config (id, ssid, password, enabled, channel, created_at, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET ssid = excluded.ssid, password = excluded.password,
+		 enabled = excluded.enabled, channel = excluded.channel, updated_at = excluded.updated_at`,
+		c.SSID, c.Password, boolToInt(c.Enabled), c.Channel, c.CreatedAt, c.UpdatedAt,
+	)
+	return err
+}
+

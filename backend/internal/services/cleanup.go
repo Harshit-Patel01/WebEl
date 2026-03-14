@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ type CleanupReport struct {
 	OrphanContainersRemoved int      `json:"orphan_containers_removed"`
 	DanglingImagesRemoved   int      `json:"dangling_images_removed"`
 	StaleDeploysFixed       int      `json:"stale_deploys_fixed"`
+	ClonedReposRemoved      int      `json:"cloned_repos_removed"`
 	Errors                  []string `json:"errors,omitempty"`
 }
 
@@ -57,10 +60,16 @@ func (c *CleanupService) RunFullCleanup(ctx context.Context) *CleanupReport {
 	report.DanglingImagesRemoved = imagesRemoved
 	report.Errors = append(report.Errors, errs...)
 
+	// 4. Clean orphaned cloned repositories
+	reposRemoved, errs := c.CleanupOrphanRepos(ctx)
+	report.ClonedReposRemoved = reposRemoved
+	report.Errors = append(report.Errors, errs...)
+
 	c.logger.Info("cleanup completed",
 		zap.Int("orphanContainers", report.OrphanContainersRemoved),
 		zap.Int("danglingImages", report.DanglingImagesRemoved),
 		zap.Int("staleDeploysFixed", report.StaleDeploysFixed),
+		zap.Int("clonedReposRemoved", report.ClonedReposRemoved),
 		zap.Int("errors", len(report.Errors)),
 	)
 
@@ -208,6 +217,73 @@ func (c *CleanupService) CleanupDanglingImages(ctx context.Context) (int, []stri
 	removed := 0
 	for _, line := range result.Lines {
 		if line.Stream == "stdout" && strings.Contains(line.Text, "deleted:") {
+			removed++
+		}
+	}
+
+	return removed, errors
+}
+
+// CleanupOrphanRepos removes cloned repositories in /tmp that don't have active projects
+func (c *CleanupService) CleanupOrphanRepos(ctx context.Context) (int, []string) {
+	var errors []string
+
+	// Get all active project IDs from the database
+	activeProjects := make(map[string]bool)
+	projects, err := c.db.ListProjects()
+	if err != nil {
+		c.logger.Error("Failed to list projects for repo cleanup", zap.Error(err))
+		errors = append(errors, fmt.Sprintf("failed to list projects: %v", err))
+		return 0, errors
+	}
+
+	for _, project := range projects {
+		activeProjects[project.ID] = true
+	}
+
+	// List all directories in /tmp that might be cloned repos
+	tmpDir := "/tmp"
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		c.logger.Error("Failed to read /tmp directory", zap.Error(err))
+		errors = append(errors, fmt.Sprintf("failed to read /tmp: %v", err))
+		return 0, errors
+	}
+
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		dirPath := filepath.Join(tmpDir, entry.Name())
+
+		// Check if this directory has a .git folder (indicating it's a cloned repo)
+		gitPath := filepath.Join(dirPath, ".git")
+		if _, err := os.Stat(gitPath); err != nil {
+			// Not a git repo, skip
+			continue
+		}
+
+		// Check if this project ID is still active
+		if activeProjects[entry.Name()] {
+			// Active project, don't remove
+			continue
+		}
+
+		// This is an orphaned cloned repository - remove it
+		c.logger.Info("removing orphaned cloned repository",
+			zap.String("path", dirPath),
+			zap.String("projectId", entry.Name()),
+		)
+
+		if err := os.RemoveAll(dirPath); err != nil {
+			c.logger.Error("Failed to remove orphaned repo",
+				zap.String("path", dirPath),
+				zap.Error(err),
+			)
+			errors = append(errors, fmt.Sprintf("failed to remove %s: %v", dirPath, err))
+		} else {
 			removed++
 		}
 	}

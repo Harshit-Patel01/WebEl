@@ -17,11 +17,12 @@ import (
 type FrameworkType string
 
 const (
-	FrameworkNodeExpress  FrameworkType = "node_express"
+	FrameworkNodeExpress   FrameworkType = "node_express"
 	FrameworkPythonFastAPI FrameworkType = "python_fastapi"
-	FrameworkPythonDjango FrameworkType = "python_django"
-	FrameworkGo           FrameworkType = "go"
-	FrameworkNodeStatic   FrameworkType = "node_static"
+	FrameworkPythonDjango  FrameworkType = "python_django"
+	FrameworkGo            FrameworkType = "go"
+	FrameworkNodeStatic    FrameworkType = "node_static"
+	FrameworkStatic        FrameworkType = "static"
 )
 
 // DockerService handles Docker-based builds.
@@ -62,7 +63,8 @@ func (d *DockerService) DetectFramework(projectDir string) FrameworkType {
 		return FrameworkNodeStatic
 	}
 
-	return FrameworkNodeStatic
+	// Pure static site (no package.json, no build tools)
+	return FrameworkStatic
 }
 
 func (d *DockerService) fileContains(path, substr string) bool {
@@ -406,7 +408,7 @@ func GetDefaultPort(framework FrameworkType) int {
 
 // IsBackendFramework returns true if the framework is a backend app (needs a service).
 func IsBackendFramework(framework FrameworkType) bool {
-	return framework != FrameworkNodeStatic
+	return framework != FrameworkNodeStatic && framework != FrameworkStatic
 }
 
 // GetDefaultInstallCommand returns the default install command for a framework.
