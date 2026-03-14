@@ -254,10 +254,38 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 		return installResult, fmt.Errorf("npm install failed")
 	}
 
-	// Step 2: Build
+	// Step 2: Check if package.json exists and has build script
+	packageJsonPath := filepath.Join(dir, "package.json")
+	if !fileExists(packageJsonPath) {
+		return nil, fmt.Errorf("package.json not found in %s", dir)
+	}
+
+	// Read package.json to check for build script
+	packageData, err := os.ReadFile(packageJsonPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read package.json: %w", err)
+	}
+
+	// Parse package.json to verify build script exists
+	var pkgJSON struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(packageData, &pkgJSON); err != nil {
+		d.logger.Warn("failed to parse package.json", zap.Error(err))
+	}
+
+	// Step 3: Build
 	if buildCmd == "" {
 		buildCmd = "build"
 	}
+
+	// Check if the build script exists in package.json
+	if pkgJSON.Scripts != nil {
+		if _, exists := pkgJSON.Scripts[buildCmd]; !exists {
+			return nil, fmt.Errorf("build script '%s' not found in package.json. Available scripts: %v", buildCmd, pkgJSON.Scripts)
+		}
+	}
+
 	d.logger.Info("running npm build", zap.String("dir", dir), zap.String("cmd", buildCmd))
 	buildResult, err := d.runner.Run(ctx, exec.RunOpts{
 		JobID:          jobID + "-build",
@@ -278,7 +306,7 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 		return buildResult, fmt.Errorf("npm build failed")
 	}
 
-	// Step 3: Verify output directory
+	// Step 4: Verify output directory
 	if outputDir == "" {
 		// Try common output directories
 		for _, candidate := range []string{"dist", "build", ".next", "out"} {
@@ -540,7 +568,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			actualProjectDir = filepath.Join(projectDir, workingDir)
 		}
 
-		// Detect framework
+		// Detect framework immediately after determining working directory
+		d.broadcastPhase(deployID, "detect", "Detecting framework...")
 		framework := d.docker.DetectFramework(actualProjectDir)
 		d.logger.Info("detected framework",
 			zap.String("projectId", project.ID),
@@ -568,6 +597,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 		isBackend := IsBackendFramework(framework)
 		useDocker := d.cfg.DockerEnabled && isBackend // Docker only for backends when enabled
+
+		logToDB("stdout", fmt.Sprintf("Deployment mode: %s (Docker: %v)", map[bool]string{true: "backend", false: "frontend"}[isBackend], useDocker))
 
 		if useDocker {
 			// Docker path for backend services only
