@@ -20,7 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runner, logger *zap.Logger, wifiMonitor *services.WifiMonitor) http.Handler {
+func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runner, logger *zap.Logger, wifiAP *services.WifiAP) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -53,7 +53,6 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	// Connect services to deploy service
 	deploySvc.SetNginxService(nginxSvc)
 	deploySvc.SetContainerService(containerSvc)
-	deploySvc.SetWifiMonitor(wifiMonitor)
 
 	// Run startup cleanup: fix stale deployments and orphan containers
 	go func() {
@@ -83,134 +82,144 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	deployLogH := &deployLogHandlers{db: db}
 	sseH := &sseHandlers{db: db, logger: logger}
 	cleanupH := &cleanupHandlers{service: cleanupSvc}
-
-	// Public routes (no auth required)
-	r.Route("/api/v1/auth", func(r chi.Router) {
-		// Auth routes are public
-		r.Post("/login", authH.login)
-		r.Post("/setup", authH.setupPassword)
-		r.Get("/status", authH.status)
-	})
+	apH := &apHandlers{service: wifiAP}
 
 	// WebSocket endpoint (auth checked on upgrade)
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(hub, w, r)
 	})
 
-	// Protected routes
+	// All API routes under /api/v1
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(a.Middleware)
+		// Public auth routes (no auth middleware)
+		r.Group(func(r chi.Router) {
+			r.Post("/auth/login", authH.login)
+			r.Post("/auth/setup", authH.setupPassword)
+			r.Get("/auth/status", authH.status)
+			// logout just clears the cookie — safe even if unauthenticated
+			r.Post("/auth/logout", authH.logout)
+			// change-password self-validates via current_password in body
+			r.Post("/auth/change-password", authH.changePassword)
+		})
 
-		// Auth
-		r.Post("/auth/logout", authH.logout)
-		r.Post("/auth/change-password", authH.changePassword)
+		// Protected routes (require auth)
+		r.Group(func(r chi.Router) {
+			r.Use(a.Middleware)
 
-		// WiFi
-		r.Get("/wifi/networks", wifiH.scanNetworks)
-		r.Get("/wifi/status", wifiH.getStatus)
-		r.Post("/wifi/connect", wifiH.connect)
-		r.Post("/wifi/disconnect", wifiH.disconnect)
-		r.Put("/wifi/password", wifiH.updatePassword)
-		r.Get("/wifi/saved", wifiH.getSavedNetworks)
-		r.Delete("/wifi/saved", wifiH.deleteSavedNetwork)
+			// WiFi
+			r.Get("/wifi/networks", wifiH.scanNetworks)
+			r.Get("/wifi/status", wifiH.getStatus)
+			r.Post("/wifi/connect", wifiH.connect)
+			r.Post("/wifi/disconnect", wifiH.disconnect)
+			r.Put("/wifi/password", wifiH.updatePassword)
+			r.Get("/wifi/saved", wifiH.getSavedNetworks)
+			r.Delete("/wifi/saved", wifiH.deleteSavedNetwork)
 
-		// Tunnel
-		r.Post("/tunnel/validate-token", tunnelH.validateToken)
-		r.Get("/tunnel/accounts", tunnelH.listAccounts)
-		r.Get("/tunnel/zones", tunnelH.listZones)
-		r.Get("/tunnel/zones/stored", tunnelH.getStoredZones)
-		r.Post("/tunnel/create", tunnelH.createTunnel)
-		r.Get("/tunnel/status", tunnelH.getStatus)
-		r.Post("/tunnel/verify", tunnelH.verifyAndCleanup)
-		r.Post("/tunnel/restart", tunnelH.restart)
-		r.Post("/tunnel/stop", tunnelH.stopLocalTunnel)
-		r.Delete("/tunnel", tunnelH.deleteTunnel)
-		r.Get("/tunnel/all", tunnelH.listAllTunnels)
-		r.Delete("/tunnel/remote/{accountId}/{tunnelId}", tunnelH.stopRemoteTunnel)
+			// Tunnel
+			r.Post("/tunnel/validate-token", tunnelH.validateToken)
+			r.Get("/tunnel/accounts", tunnelH.listAccounts)
+			r.Get("/tunnel/zones", tunnelH.listZones)
+			r.Get("/tunnel/zones/stored", tunnelH.getStoredZones)
+			r.Post("/tunnel/create", tunnelH.createTunnel)
+			r.Get("/tunnel/status", tunnelH.getStatus)
+			r.Post("/tunnel/verify", tunnelH.verifyAndCleanup)
+			r.Post("/tunnel/restart", tunnelH.restart)
+			r.Post("/tunnel/stop", tunnelH.stopLocalTunnel)
+			r.Delete("/tunnel", tunnelH.deleteTunnel)
+			r.Get("/tunnel/all", tunnelH.listAllTunnels)
+			r.Delete("/tunnel/remote/{accountId}/{tunnelId}", tunnelH.stopRemoteTunnel)
 
-		// Tunnel Routes
-		r.Get("/tunnel/routes", tunnelH.listRoutes)
-		r.Post("/tunnel/routes", tunnelH.createRoute)
-		r.Put("/tunnel/routes/{id}", tunnelH.updateRoute)
-		r.Delete("/tunnel/routes/{id}", tunnelH.deleteRoute)
-		r.Post("/tunnel/routes/reorder", tunnelH.reorderRoutes)
-		r.Get("/tunnel/check-port/{port}", tunnelH.checkPort)
-		r.Get("/tunnel/routes/{id}/verify-dns", tunnelH.verifyDNS)
-		r.Get("/tunnel/detect-drift", tunnelH.detectDrift)
-		r.Post("/tunnel/adopt", tunnelH.adoptTunnel)
+			// Tunnel Routes
+			r.Get("/tunnel/routes", tunnelH.listRoutes)
+			r.Post("/tunnel/routes", tunnelH.createRoute)
+			r.Put("/tunnel/routes/{id}", tunnelH.updateRoute)
+			r.Delete("/tunnel/routes/{id}", tunnelH.deleteRoute)
+			r.Post("/tunnel/routes/reorder", tunnelH.reorderRoutes)
+			r.Get("/tunnel/check-port/{port}", tunnelH.checkPort)
+			r.Get("/tunnel/routes/{id}/verify-dns", tunnelH.verifyDNS)
+			r.Get("/tunnel/detect-drift", tunnelH.detectDrift)
+			r.Post("/tunnel/adopt", tunnelH.adoptTunnel)
 
-		// Projects & Deploy
-		r.Get("/projects", deployH.listProjects)
-		r.Post("/projects", deployH.createProject)
-		r.Get("/projects/{id}", deployH.getProject)
-		r.Put("/projects/{id}", deployH.updateProject)
-		r.Delete("/projects/{id}", deployH.deleteProject)
-		r.Post("/projects/{id}/deploy", deployH.triggerDeploy)
-		r.Post("/projects/{id}/rebuild", deployH.rebuildProject)
-		r.Get("/projects/{id}/deploys", deployH.listDeploys)
-		r.Get("/deploys/{deployId}", deployH.getDeploy)
+			// Projects & Deploy
+			r.Get("/projects", deployH.listProjects)
+			r.Post("/projects", deployH.createProject)
+			r.Get("/projects/{id}", deployH.getProject)
+			r.Put("/projects/{id}", deployH.updateProject)
+			r.Delete("/projects/{id}", deployH.deleteProject)
+			r.Post("/projects/{id}/deploy", deployH.triggerDeploy)
+			r.Post("/projects/{id}/rebuild", deployH.rebuildProject)
+			r.Get("/projects/{id}/deploys", deployH.listDeploys)
+			r.Get("/deploys/{deployId}", deployH.getDeploy)
 
-		// Nginx
-		r.Get("/nginx/sites", nginxH.listSites)
-		r.Post("/nginx/sites", nginxH.createSite)
-		r.Put("/nginx/sites/{id}", nginxH.updateSite)
-		r.Delete("/nginx/sites/{id}", nginxH.deleteSite)
-		r.Post("/nginx/test", nginxH.testConfig)
-		r.Post("/nginx/reload", nginxH.reload)
-		r.Get("/nginx/logs", nginxH.getLogs)
+			// Nginx
+			r.Get("/nginx/sites", nginxH.listSites)
+			r.Post("/nginx/sites", nginxH.createSite)
+			r.Put("/nginx/sites/{id}", nginxH.updateSite)
+			r.Delete("/nginx/sites/{id}", nginxH.deleteSite)
+			r.Post("/nginx/test", nginxH.testConfig)
+			r.Post("/nginx/reload", nginxH.reload)
+			r.Get("/nginx/logs", nginxH.getLogs)
 
-		// Nginx file management
-		r.Get("/nginx/files", nginxH.listConfigFiles)
-		r.Get("/nginx/files/{name}", nginxH.readConfigFile)
-		r.Put("/nginx/files/{name}", nginxH.writeConfigFile)
-		r.Delete("/nginx/files/{name}", nginxH.deleteConfigFile)
-		r.Post("/nginx/files/{name}/enable", nginxH.enableSite)
-		r.Post("/nginx/files/{name}/disable", nginxH.disableSite)
+			// Nginx file management
+			r.Get("/nginx/files", nginxH.listConfigFiles)
+			r.Get("/nginx/files/{name}", nginxH.readConfigFile)
+			r.Put("/nginx/files/{name}", nginxH.writeConfigFile)
+			r.Delete("/nginx/files/{name}", nginxH.deleteConfigFile)
+			r.Post("/nginx/files/{name}/enable", nginxH.enableSite)
+			r.Post("/nginx/files/{name}/disable", nginxH.disableSite)
 
-		// Services
-		r.Get("/services", servicesH.listServices)
-		r.Get("/services/{name}", servicesH.getService)
-		r.Post("/services/{name}/start", servicesH.startService)
-		r.Post("/services/{name}/restart", servicesH.restartService)
-		r.Post("/services/{name}/stop", servicesH.stopService)
-		r.Get("/services/{name}/logs", servicesH.getServiceLogs)
+			// Services
+			r.Get("/services", servicesH.listServices)
+			r.Get("/services/{name}", servicesH.getService)
+			r.Post("/services/{name}/start", servicesH.startService)
+			r.Post("/services/{name}/restart", servicesH.restartService)
+			r.Post("/services/{name}/stop", servicesH.stopService)
+			r.Get("/services/{name}/logs", servicesH.getServiceLogs)
 
-		// System
-		r.Get("/system/stats", systemH.getStats)
-		r.Get("/system/info", systemH.getInfo)
-		r.Get("/system/setup-state", systemH.getSetupState)
+			// System
+			r.Get("/system/stats", systemH.getStats)
+			r.Get("/system/info", systemH.getInfo)
+			r.Get("/system/setup-state", systemH.getSetupState)
 
-		// Jobs
-		r.Get("/jobs/{id}", jobH.getJob)
-		r.Post("/jobs/{id}/cancel", jobH.cancelJob)
-		r.Get("/jobs", jobH.listJobs)
+			// Jobs
+			r.Get("/jobs/{id}", jobH.getJob)
+			r.Post("/jobs/{id}/cancel", jobH.cancelJob)
+			r.Get("/jobs", jobH.listJobs)
 
-		// Environment Variables
-		r.Get("/projects/{id}/env", envH.listEnvVars)
-		r.Post("/projects/{id}/env", envH.createEnvVar)
-		r.Post("/projects/{id}/env/bulk", envH.bulkImport)
-		r.Put("/env/{envId}", envH.updateEnvVar)
-		r.Delete("/env/{envId}", envH.deleteEnvVar)
+			// Environment Variables
+			r.Get("/projects/{id}/env", envH.listEnvVars)
+			r.Post("/projects/{id}/env", envH.createEnvVar)
+			r.Post("/projects/{id}/env/bulk", envH.bulkImport)
+			r.Put("/env/{envId}", envH.updateEnvVar)
+			r.Delete("/env/{envId}", envH.deleteEnvVar)
 
-		// Containers
-		r.Get("/projects/{id}/containers", containerH.listContainers)
-		r.Post("/projects/{id}/containers/{containerId}/start", containerH.startContainer)
-		r.Post("/projects/{id}/containers/stop", containerH.stopContainer)
-		r.Post("/projects/{id}/containers/restart", containerH.restartContainer)
-		r.Delete("/projects/{id}/containers", containerH.removeContainer)
-		r.Get("/containers/{containerId}/logs", containerH.getContainerLogs)
+			// Containers
+			r.Get("/projects/{id}/containers", containerH.listContainers)
+			r.Post("/projects/{id}/containers/{containerId}/start", containerH.startContainer)
+			r.Post("/projects/{id}/containers/stop", containerH.stopContainer)
+			r.Post("/projects/{id}/containers/restart", containerH.restartContainer)
+			r.Delete("/projects/{id}/containers", containerH.removeContainer)
+			r.Get("/containers/{containerId}/logs", containerH.getContainerLogs)
 
-		// Deploy Logs
-		r.Get("/deploys/{deployId}/logs", deployLogH.getDeployLogs)
-		r.Get("/deploys/{deployId}/logs/stream", sseH.streamDeployLogs)
-		r.Get("/deploys/{deployId}/logs/poll", sseH.longPollDeployLogs)
+			// Deploy Logs
+			r.Get("/deploys/{deployId}/logs", deployLogH.getDeployLogs)
+			r.Get("/deploys/{deployId}/logs/stream", sseH.streamDeployLogs)
+			r.Get("/deploys/{deployId}/logs/poll", sseH.longPollDeployLogs)
 
-		// System Cleanup
-		r.Post("/system/cleanup", cleanupH.runCleanup)
-		r.Get("/system/cleanup/status", cleanupH.getCleanupStatus)
+			// System Cleanup
+			r.Post("/system/cleanup", cleanupH.runCleanup)
+			r.Get("/system/cleanup/status", cleanupH.getCleanupStatus)
 
-		// Internet Checks
-		r.Get("/internet/check", internetH.runChecks)
+			// Internet Checks
+			r.Get("/internet/check", internetH.runChecks)
+
+			// Access Point
+			r.Get("/ap/status", apH.getStatus)
+			r.Get("/ap/config", apH.getConfig)
+			r.Put("/ap/config", apH.updateConfig)
+			r.Post("/ap/enable", apH.enable)
+			r.Post("/ap/disable", apH.disable)
+		})
 	})
 
 	// Health check (always public)
