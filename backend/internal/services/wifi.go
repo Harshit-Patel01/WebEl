@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,7 +34,6 @@ type WifiService struct {
 	logger       *zap.Logger
 	db           *state.DB
 	avahiService *AvahiService
-	wifiMonitor  *WifiMonitor
 }
 
 func NewWifiService(runner *exec.Runner, logger *zap.Logger, db *state.DB) *WifiService {
@@ -44,18 +42,9 @@ func NewWifiService(runner *exec.Runner, logger *zap.Logger, db *state.DB) *Wifi
 		logger:       logger,
 		db:           db,
 		avahiService: NewAvahiService(runner, logger),
-		wifiMonitor:  nil, // Will be set later to avoid circular dependency
 	}
 
-	// Set high priority for all existing WiFi connections on startup
-	go ws.updateExistingWifiPriorities()
-
 	return ws
-}
-
-// SetWifiMonitor sets the WifiMonitor for this service to allow checking AP mode
-func (w *WifiService) SetWifiMonitor(wifiMonitor *WifiMonitor) {
-	w.wifiMonitor = wifiMonitor
 }
 
 func (w *WifiService) ScanNetworks(ctx context.Context) ([]WifiNetwork, error) {
@@ -119,182 +108,288 @@ func (w *WifiService) ScanNetworks(ctx context.Context) ([]WifiNetwork, error) {
 }
 
 func (w *WifiService) Connect(ctx context.Context, ssid, password, jobID string) (*exec.ExecResult, error) {
-	// Validate SSID
 	if !isValidSSID(ssid) {
 		return nil, fmt.Errorf("invalid SSID")
 	}
 
-	// Enable manual connect mode to prevent WiFi monitor from interfering
-	if w.wifiMonitor != nil {
-		w.wifiMonitor.SetManualConnectMode(90 * time.Second)
-	}
+	w.logger.Info("Connecting to WiFi", zap.String("ssid", ssid))
 
-	// First, bring down the hotspot if it's active to free up wlan0
-	if w.wifiMonitor != nil && w.wifiMonitor.IsAPEnabled() {
-		w.logger.Info("Bringing down hotspot before WiFi connection attempt")
-		_, _ = w.runner.Run(ctx, exec.RunOpts{
-			JobType: "wifi_down_hotspot_before_connect",
-			Command: "sudo",
-			Args:    []string{"nmcli", "connection", "down", "webel-hotspot"},
-			Timeout: 10 * time.Second,
-		})
-		time.Sleep(2 * time.Second)
-	}
+	// AP runs on separate virtual interface (ap0) — do NOT touch it here.
+	// wlan0 is for STA (station) mode only.
 
-	// Check if connection profile already exists
-	checkResult, _ := w.runner.Run(ctx, exec.RunOpts{
-		JobType: "wifi_check_existing",
+	// Step 1: Detect security type of target network
+	securityType, err := w.detectSecurityType(ctx, ssid)
+	if err != nil {
+		w.logger.Warn("Failed to detect security type, defaulting to WPA-PSK", zap.Error(err))
+		securityType = "WPA2" // Default fallback
+	}
+	w.logger.Info("Detected security type", zap.String("ssid", ssid), zap.String("security", securityType))
+
+	// Step 2: Ensure NetworkManager manages wlan0
+	w.runner.Run(ctx, exec.RunOpts{
+		JobType: "nm_manage",
 		Command: "sudo",
-		Args:    []string{"nmcli", "-t", "-f", "NAME", "connection", "show"},
+		Args:    []string{"nmcli", "device", "set", "wlan0", "managed", "yes"},
 		Timeout: 5 * time.Second,
 	})
 
-	connectionExists := false
-	if checkResult != nil {
-		for _, line := range checkResult.Lines {
-			if line.Stream == "stdout" && strings.TrimSpace(line.Text) == ssid {
-				connectionExists = true
-				break
+	time.Sleep(1 * time.Second)
+
+	// Step 3: Disconnect current WiFi cleanly (if any)
+	w.runner.Run(ctx, exec.RunOpts{
+		JobID:   jobID,
+		JobType: "wifi_disconnect",
+		Command: "sudo",
+		Args:    []string{"nmcli", "device", "disconnect", "wlan0"},
+		Timeout: 10 * time.Second,
+	})
+	time.Sleep(1 * time.Second)
+
+	// Step 4: Delete old connection profiles for this SSID (including netplan variants)
+	w.logger.Info("Deleting old connection profiles", zap.String("ssid", ssid))
+	w.runner.Run(ctx, exec.RunOpts{
+		JobID:   jobID,
+		JobType: "delete_profile",
+		Command: "sudo",
+		Args:    []string{"nmcli", "connection", "delete", ssid},
+		Timeout: 5 * time.Second,
+	})
+	w.runner.Run(ctx, exec.RunOpts{
+		JobID:   jobID,
+		JobType: "delete_netplan_profile",
+		Command: "sudo",
+		Args:    []string{"nmcli", "connection", "delete", "netplan-wlan0-" + ssid},
+		Timeout: 5 * time.Second,
+	})
+
+	time.Sleep(1 * time.Second)
+
+	// Step 5: Create new connection profile with HIGHEST priority
+	// New connection gets priority 100; all others will be lowered afterward.
+	w.logger.Info("Creating connection profile", zap.String("ssid", ssid), zap.String("security", securityType))
+
+	var createResult *exec.ExecResult
+	var createErr error
+
+	if securityType == "Open" || securityType == "" {
+		createResult, createErr = w.runner.Run(ctx, exec.RunOpts{
+			JobID:   jobID,
+			JobType: "create_profile",
+			Command: "sudo",
+			Args: []string{
+				"nmcli", "connection", "add",
+				"type", "wifi",
+				"con-name", ssid,
+				"ifname", "wlan0",
+				"ssid", ssid,
+				"connection.autoconnect", "yes",
+				"connection.autoconnect-priority", "100",
+			},
+			Timeout: 10 * time.Second,
+		})
+	} else if strings.Contains(securityType, "WEP") {
+		createResult, createErr = w.runner.Run(ctx, exec.RunOpts{
+			JobID:   jobID,
+			JobType: "create_profile",
+			Command: "sudo",
+			Args: []string{
+				"nmcli", "connection", "add",
+				"type", "wifi",
+				"con-name", ssid,
+				"ifname", "wlan0",
+				"ssid", ssid,
+				"wifi-sec.key-mgmt", "none",
+				"wifi-sec.wep-key0", password,
+				"connection.autoconnect", "yes",
+				"connection.autoconnect-priority", "100",
+			},
+			Timeout: 10 * time.Second,
+		})
+	} else {
+		createResult, createErr = w.runner.Run(ctx, exec.RunOpts{
+			JobID:   jobID,
+			JobType: "create_profile",
+			Command: "sudo",
+			Args: []string{
+				"nmcli", "connection", "add",
+				"type", "wifi",
+				"con-name", ssid,
+				"ifname", "wlan0",
+				"ssid", ssid,
+				"wifi-sec.key-mgmt", "wpa-psk",
+				"wifi-sec.psk", password,
+				"connection.autoconnect", "yes",
+				"connection.autoconnect-priority", "100",
+			},
+			Timeout: 10 * time.Second,
+		})
+	}
+
+	if createErr != nil || !createResult.Success {
+		w.logger.Error("Failed to create connection profile", zap.Error(createErr))
+		return &exec.ExecResult{
+			Success: false,
+			Lines: []exec.LogLine{
+				{Stream: "stderr", Text: "Failed to create connection profile", Timestamp: time.Now()},
+			},
+		}, fmt.Errorf("failed to create connection profile")
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// Step 6: Activate the new connection
+	w.logger.Info("Activating new connection", zap.String("ssid", ssid))
+	connectResult, err := w.runner.Run(ctx, exec.RunOpts{
+		JobID:   jobID,
+		JobType: "wifi_connect",
+		Command: "sudo",
+		Args:    []string{"nmcli", "connection", "up", ssid},
+		Timeout: 45 * time.Second,
+	})
+
+	if err != nil || !connectResult.Success {
+		w.logger.Error("Failed to activate connection", zap.Error(err))
+		return &exec.ExecResult{
+			Success: false,
+			Lines: []exec.LogLine{
+				{Stream: "stderr", Text: "Failed to activate WiFi connection", Timestamp: time.Now()},
+			},
+		}, fmt.Errorf("failed to activate connection")
+	}
+
+	// Step 7: Verify connection (check for IP assignment)
+	w.logger.Info("Verifying connection", zap.String("ssid", ssid))
+	time.Sleep(5 * time.Second)
+
+	verified := false
+	for i := 0; i < 10; i++ {
+		status, err := w.GetStatus(ctx)
+		if err == nil && status.Connected && status.SSID == ssid && status.IP != "" {
+			w.logger.Info("WiFi connected and verified", zap.String("ssid", ssid), zap.String("ip", status.IP))
+			verified = true
+			break
+		}
+		w.logger.Debug("Waiting for connection to stabilize", zap.Int("attempt", i+1))
+		time.Sleep(3 * time.Second)
+	}
+
+	if !verified {
+		w.logger.Error("Connection verification failed - no IP assigned after 35 seconds")
+		return &exec.ExecResult{
+			Success: false,
+			Lines: []exec.LogLine{
+				{Stream: "stderr", Text: "Connection verification failed - no IP assigned after 35 seconds", Timestamp: time.Now()},
+			},
+		}, fmt.Errorf("connection verification failed")
+	}
+
+	// Step 8: Lower priority of ALL other WiFi connections
+	// This ensures NetworkManager will auto-connect to the NEW network on reboot,
+	// not the old one. The user can manually switch back if they want.
+	w.lowerOtherWifiPriorities(ctx, ssid)
+
+	// Success - save to database
+	if w.db != nil {
+		now := time.Now()
+		w.db.SaveWifiNetwork(&state.SavedWifiNetwork{
+			SSID:            ssid,
+			Password:        password,
+			Security:        securityType,
+			LastConnectedAt: &now,
+		})
+	}
+
+	// Refresh Avahi
+	if err := w.avahiService.RefreshHostname(ctx); err != nil {
+		w.logger.Warn("Failed to refresh Avahi", zap.Error(err))
+	}
+
+	connectResult.Success = true
+	return connectResult, nil
+}
+
+// detectSecurityType scans for the network and returns its security type
+func (w *WifiService) detectSecurityType(ctx context.Context, ssid string) (string, error) {
+	result, err := w.runner.Run(ctx, exec.RunOpts{
+		JobType: "detect_security",
+		Command: "sudo",
+		Args:    []string{"nmcli", "-t", "-f", "SSID,SECURITY", "device", "wifi", "list"},
+		Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	for _, line := range result.Lines {
+		if line.Stream != "stdout" {
+			continue
+		}
+		parts := strings.SplitN(line.Text, ":", 2)
+		if len(parts) == 2 {
+			networkSSID := strings.TrimSpace(parts[0])
+			security := strings.TrimSpace(parts[1])
+
+			if networkSSID == ssid {
+				if security == "" || security == "--" {
+					return "Open", nil
+				}
+				// Return the actual security string from nmcli
+				return security, nil
 			}
 		}
 	}
 
-	var result *exec.ExecResult
-	var err error
+	return "", fmt.Errorf("network not found in scan")
+}
 
-	if connectionExists {
-		// Connection exists, update password and priority, then activate
-		w.logger.Info("Connection profile exists, updating credentials", zap.String("ssid", ssid))
+// lowerOtherWifiPriorities sets all other WiFi connections to lower priority
+// so NetworkManager will auto-connect to the most recently used network on reboot.
+// The current SSID keeps priority 100; all others get decremented based on age.
+func (w *WifiService) lowerOtherWifiPriorities(ctx context.Context, currentSSID string) {
+	w.logger.Info("Updating WiFi priorities — new network gets highest",
+		zap.String("highest", currentSSID))
 
-		// Update password if provided
-		if password != "" {
-			_, _ = w.runner.Run(ctx, exec.RunOpts{
-				JobType: "wifi_update_password",
-				Command: "sudo",
-				Args:    []string{"nmcli", "connection", "modify", ssid, "wifi-sec.psk", password},
-				Timeout: 5 * time.Second,
-			})
+	listResult, _ := w.runner.Run(ctx, exec.RunOpts{
+		JobType: "list_connections",
+		Command: "sudo",
+		Args:    []string{"nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"},
+		Timeout: 10 * time.Second,
+	})
+
+	if listResult == nil {
+		return
+	}
+
+	for _, line := range listResult.Lines {
+		if line.Stream != "stdout" || !strings.Contains(line.Text, ":wifi") {
+			continue
+		}
+		parts := strings.SplitN(line.Text, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		connName := strings.TrimSpace(parts[0])
+
+		// Skip the new connection (it already has priority 100)
+		if connName == currentSSID {
+			continue
+		}
+		// Skip AP hotspot connections
+		if connName == "webel-hotspot" || connName == "Hotspot" {
+			continue
 		}
 
-		// Set high priority
-		w.logger.Info("Setting high priority for existing connection", zap.String("ssid", ssid))
-		_, _ = w.runner.Run(ctx, exec.RunOpts{
-			JobType: "wifi_set_priority",
+		// Set other connections to priority 10 (still auto-connect, but lower than 100)
+		// This means: if the priority-100 network is unavailable, NM will try these.
+		w.runner.Run(ctx, exec.RunOpts{
+			JobType: "lower_priority",
 			Command: "sudo",
-			Args: []string{
-				"nmcli", "connection", "modify", ssid,
-				"connection.autoconnect-priority", "100",
-			},
+			Args:    []string{"nmcli", "connection", "modify", connName, "connection.autoconnect-priority", "10"},
 			Timeout: 5 * time.Second,
 		})
-
-		// Disconnect wlan0 first
-		w.logger.Info("Disconnecting wlan0 before activation")
-		_, _ = w.runner.Run(ctx, exec.RunOpts{
-			JobType: "wifi_disconnect_before_connect",
-			Command: "sudo",
-			Args:    []string{"nmcli", "device", "disconnect", "wlan0"},
-			Timeout: 5 * time.Second,
-		})
-
-		time.Sleep(2 * time.Second)
-
-		// Activate the connection
-		w.logger.Info("Activating existing WiFi connection", zap.String("ssid", ssid))
-		result, err = w.runner.Run(ctx, exec.RunOpts{
-			JobID:   jobID,
-			JobType: "wifi_connect",
-			Command: "sudo",
-			Args:    []string{"nmcli", "connection", "up", ssid},
-			Timeout: 45 * time.Second,
-		})
-	} else {
-		// Connection doesn't exist, create new one
-		w.logger.Info("Creating new WiFi connection", zap.String("ssid", ssid))
-
-		// Disconnect wlan0 to ensure clean state
-		_, _ = w.runner.Run(ctx, exec.RunOpts{
-			JobType: "wifi_disconnect_before_connect",
-			Command: "sudo",
-			Args:    []string{"nmcli", "device", "disconnect", "wlan0"},
-			Timeout: 5 * time.Second,
-		})
-
-		time.Sleep(2 * time.Second)
-
-		// Create and connect
-		args := []string{"nmcli", "device", "wifi", "connect", ssid}
-		if password != "" {
-			args = append(args, "password", password)
-		}
-
-		result, err = w.runner.Run(ctx, exec.RunOpts{
-			JobID:   jobID,
-			JobType: "wifi_connect",
-			Command: "sudo",
-			Args:    args,
-			Timeout: 45 * time.Second,
-		})
-
-		// Set high priority for new connection
-		if err == nil && result.Success {
-			w.logger.Info("Setting high priority for new connection", zap.String("ssid", ssid))
-			_, _ = w.runner.Run(ctx, exec.RunOpts{
-				JobType: "wifi_set_priority",
-				Command: "sudo",
-				Args: []string{
-					"nmcli", "connection", "modify", ssid,
-					"connection.autoconnect-priority", "100",
-				},
-				Timeout: 5 * time.Second,
-			})
-		}
+		w.logger.Debug("Lowered priority for WiFi connection",
+			zap.String("name", connName), zap.Int("priority", 10))
 	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Wait for network to stabilize after connection
-	if result.Success {
-		w.logger.Info("WiFi connection successful, waiting for stabilization", zap.String("ssid", ssid))
-		time.Sleep(5 * time.Second)
-	}
-
-	// Verify actual internet access
-	if result.Success {
-		// Give more time for internet to be available after connection
-		w.logger.Info("Verifying internet connectivity", zap.String("ssid", ssid))
-		time.Sleep(3 * time.Second)
-
-		if !w.verifyInternet() {
-			w.logger.Warn("WiFi connected but no internet access", zap.String("ssid", ssid))
-			// Don't fail the connection if internet is not available
-			// Some networks might have captive portals or delayed internet access
-			result.Success = true
-			result.Error = ""
-		} else {
-			w.logger.Info("WiFi connection verified with internet access", zap.String("ssid", ssid))
-		}
-
-		// Refresh Avahi to re-broadcast mDNS hostname after network change
-		if err := w.avahiService.RefreshHostname(ctx); err != nil {
-			w.logger.Warn("Failed to refresh Avahi hostname", zap.Error(err))
-		}
-
-		// Save the network and password on successful connection
-		if w.db != nil {
-			now := time.Now()
-			_ = w.db.SaveWifiNetwork(&state.SavedWifiNetwork{
-				SSID:            ssid,
-				Password:        password,
-				Security:        "WPA", // Default, could be improved by detecting actual security
-				LastConnectedAt: &now,
-			})
-		}
-	}
-
-	return result, nil
 }
 
 func (w *WifiService) Disconnect(ctx context.Context) error {
@@ -371,31 +466,6 @@ func (w *WifiService) getCurrentSSID() string {
 	return ""
 }
 
-func (w *WifiService) verifyInternet() bool {
-	// If AP mode is enabled, the device won't have internet access by design
-	// so we should return true to avoid disrupting the AP functionality
-	// if w.wifiMonitor != nil && w.wifiMonitor.IsAPEnabled() {
-	// 	w.logger.Debug("AP mode is enabled, skipping internet verification")
-	// 	return true
-	// }
-
-	// Try multiple times with delays to allow network to stabilize
-	for i := 0; i < 5; i++ {
-		if i > 0 {
-			time.Sleep(2 * time.Second)
-		}
-
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Head("http://1.1.1.1")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 400 {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 var ssidRegex = regexp.MustCompile(`^[\w\s\-\.!@#$%^&*()\'":;,+=\[\]{}<>/\?\\]{1,64}$`)
 
@@ -432,60 +502,4 @@ func (w *WifiService) RefreshAvahiAfterNetworkChange(ctx context.Context) error 
 	return w.avahiService.RefreshHostname(ctx)
 }
 
-// updateExistingWifiPriorities sets high priority for all existing WiFi connections
-func (w *WifiService) updateExistingWifiPriorities() {
-	ctx := context.Background()
-	w.logger.Info("Updating priorities for existing WiFi connections")
 
-	// Get all WiFi connections
-	result, err := w.runner.Run(ctx, exec.RunOpts{
-		JobType: "wifi_list_connections",
-		Command: "sudo",
-		Args:    []string{"nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"},
-		Timeout: 10 * time.Second,
-	})
-
-	if err != nil {
-		w.logger.Error("Failed to list connections", zap.Error(err))
-		return
-	}
-
-	for _, line := range result.Lines {
-		if line.Stream != "stdout" || line.Text == "" {
-			continue
-		}
-
-		parts := strings.SplitN(line.Text, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		name := strings.TrimSpace(parts[0])
-		connType := strings.TrimSpace(parts[1])
-
-		// Skip non-WiFi connections and the AP hotspot
-		if connType != "wifi" || name == "webel-hotspot" || name == "Hotspot" {
-			continue
-		}
-
-		// Set high priority for this WiFi connection
-		w.logger.Info("Setting high priority for existing WiFi connection", zap.String("name", name))
-		_, err := w.runner.Run(ctx, exec.RunOpts{
-			JobType: "wifi_update_priority",
-			Command: "sudo",
-			Args: []string{
-				"nmcli", "connection", "modify", name,
-				"connection.autoconnect-priority", "100",
-			},
-			Timeout: 5 * time.Second,
-		})
-
-		if err != nil {
-			w.logger.Warn("Failed to update priority for connection",
-				zap.String("name", name),
-				zap.Error(err))
-		}
-	}
-
-	w.logger.Info("Finished updating WiFi connection priorities")
-}
