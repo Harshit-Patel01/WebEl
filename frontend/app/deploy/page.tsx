@@ -380,9 +380,9 @@ export default function DeployPage() {
 
         {/* Form + Build state */}
         {(state === 'form' || state === 'building') && (
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {/* Form */}
-            <div className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden">
+            <div className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden xl:h-fit xl:sticky xl:top-6">
               {/* Header */}
               <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30">
                 <h2 className="font-serif text-h2 mb-2">Deploy from GitHub</h2>
@@ -496,7 +496,6 @@ export default function DeployPage() {
                         Working Directory
                       </label>
                       <input
-                        value={workingDir}
                         value={workingDir}
                         onChange={e => setWorkingDir(e.target.value)}
                         disabled={deploying}
@@ -726,11 +725,17 @@ export default function DeployPage() {
                 </div>
 
                 {/* Environment Variables */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="font-mono text-label uppercase tracking-wider text-text-secondary">
+                <div className="border-t border-border-dark pt-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Lock size={16} className="text-accent-lime" />
+                    <h3 className="font-mono text-[12px] uppercase tracking-wider text-text-primary font-bold">
                       Environment Variables
-                    </label>
+                    </h3>
+                  </div>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="font-mono text-[10px] text-text-secondary">
+                      Configure runtime environment variables
+                    </p>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setShowBulkImport(!showBulkImport)}
@@ -884,14 +889,14 @@ export default function DeployPage() {
               </div>
             </div>
 
-            {/* Build Log Panel */}
+            {/* Build Log Panel - Right Column on Large Screens */}
             {state === 'building' && currentDeployId && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden"
+                className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden xl:h-[calc(100vh-8rem)] xl:sticky xl:top-6 flex flex-col"
               >
-                <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30">
+                <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30 flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <Terminal size={16} className="text-accent-lime" />
                     <h3 className="font-mono text-[12px] uppercase tracking-wider text-text-primary font-bold">
@@ -899,17 +904,34 @@ export default function DeployPage() {
                     </h3>
                   </div>
                 </div>
-                <div className="p-6">
-                  <div className="mb-4">
+                <div className="p-6 flex-1 flex flex-col overflow-hidden">
+                  <div className="mb-4 flex-shrink-0">
                     <BuildProgress currentPhase={buildPhase} />
                   </div>
-                  <DeployLogStream
-                    deployId={currentDeployId}
-                    onComplete={handleDeployComplete}
-                    maxHeight="600px"
-                  />
+                  <div className="flex-1 overflow-hidden">
+                    <DeployLogStream
+                      deployId={currentDeployId}
+                      onComplete={handleDeployComplete}
+                      maxHeight="100%"
+                    />
+                  </div>
                 </div>
               </motion.div>
+            )}
+
+            {/* Placeholder for right column when not building */}
+            {state === 'form' && !currentDeployId && (
+              <div className="hidden xl:flex bg-bg-secondary rounded-card border border-border-dark overflow-hidden items-center justify-center p-12">
+                <div className="text-center">
+                  <Terminal size={48} className="text-text-secondary/30 mx-auto mb-4" />
+                  <p className="font-mono text-small text-text-secondary">
+                    Build logs will appear here
+                  </p>
+                  <p className="font-mono text-[10px] text-text-secondary/70 mt-2">
+                    Configure your project and click Deploy
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         )}
