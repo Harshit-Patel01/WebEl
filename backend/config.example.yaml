@@ -17,8 +17,6 @@ deploy:
   python_binary: "/usr/bin/python3"
   docker_binary: "/usr/bin/docker"
   docker_enabled: true
-  docker_memory_limit: "4096m"
-  docker_cpu_limit: "1.0"
   output_root: "/var/www/opendeploy"
   port_pool_start: 8000
   port_pool_end: 9000
