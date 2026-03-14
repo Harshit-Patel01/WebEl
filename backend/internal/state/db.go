@@ -51,7 +51,7 @@ func (db *DB) runMigrations() error {
 	}
 
 	// Run migrations sequentially
-	migrations := []string{migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012}
+	migrations := []string{migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013}
 
 	for i, m := range migrations {
 		version := i + 1
@@ -307,4 +307,22 @@ ALTER TABLE deploys ADD COLUMN is_backend INTEGER DEFAULT 0;
 ALTER TABLE deploys ADD COLUMN build_duration REAL DEFAULT 0;
 
 INSERT OR REPLACE INTO schema_version (version) VALUES (12);
+`
+
+const migration013 = `
+-- Create ap_config table for WiFi Access Point configuration (singleton row)
+CREATE TABLE IF NOT EXISTS ap_config (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	ssid TEXT NOT NULL DEFAULT 'webel',
+	password TEXT NOT NULL DEFAULT 'webel123',
+	enabled INTEGER NOT NULL DEFAULT 1,
+	channel INTEGER NOT NULL DEFAULT 6,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert default AP config
+INSERT OR IGNORE INTO ap_config (id, ssid, password, enabled, channel) VALUES (1, 'webel', 'webel123', 1, 6);
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (13);
 `
