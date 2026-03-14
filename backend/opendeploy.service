@@ -1,49 +1,23 @@
 [Unit]
 Description=opendeploy Hosting Dashboard
-After=network-online.target avahi-daemon.service systemd-resolved.service
-Wants=network-online.target
-Requires=avahi-daemon.service
-
-StartLimitIntervalSec=300
-StartLimitBurst=10
+After=local-fs.target avahi-daemon.service
 
 [Service]
 Type=simple
-User=opendeploy
-Group=opendeploy
+User=root
+Group=root
 
-ExecStartPre=/bin/sh -c 'until ip route | grep -q default; do sleep 2; done'
-
+ExecStartPre=/usr/bin/mkdir -p /var/lib/opendeploy /var/log/opendeploy
 ExecStart=/usr/local/bin/opendeploy --config /etc/opendeploy/config.yaml
 
 Restart=always
 RestartSec=5
-RestartSteps=5
-RestartMaxDelaySec=30
-
-WatchdogSec=30
-NotifyAccess=main
-
-TimeoutStartSec=90
-TimeoutStopSec=30
-
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=opendeploy
-Environment=opendeploy_ENV=production
 
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=yes
-LockPersonality=yes
-MemoryDenyWriteExecute=yes
-ReadWritePaths=/var/lib/opendeploy /var/log/opendeploy /etc/cloudflared /etc/nginx/sites-available /etc/nginx/sites-enabled
+Environment=opendeploy_ENV=production
+Environment=GODEBUG=netdns=go
 
 [Install]
 WantedBy=multi-user.target
