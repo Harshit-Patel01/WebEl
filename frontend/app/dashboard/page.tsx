@@ -7,7 +7,7 @@ import Link from 'next/link'
 import SectionBadge from '@/components/ui/SectionBadge'
 import ServiceCard from '@/components/ui/ServiceCard'
 import PipelineDiagram from '@/components/ui/PipelineDiagram'
-import { servicesApi, systemApi, deployApi } from '@/lib/api'
+import { servicesApi, systemApi, deployApi, tunnelApi } from '@/lib/api'
 import { useWebSocket } from '@/contexts/WebSocketContext'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -41,22 +41,32 @@ export default function DashboardPage() {
 
         const newServices = [...services]
 
-        // Debug: log all service names
-        console.log('Services from API:', svcs.map(s => ({ name: s.name, status: s.status })))
-
         svcs.forEach(s => {
           if (s.name === 'nginx') {
             newServices[0].status = s.status === 'active' ? 'healthy' : 'error'
             newServices[0].statusLabel = s.status === 'active' ? 'Running' : 'Stopped'
             newServices[0].detail = s.uptime ? `Uptime: ${s.uptime}` : 'Web Server'
           }
-          if (s.name === 'cloudflared') {
+          if (s.name === 'opendeploy-cloudflared') {
             newServices[1].status = s.status === 'active' ? 'healthy' : 'error'
             newServices[1].statusLabel = s.status === 'active' ? 'Active' : 'Offline'
             newServices[1].detail = s.uptime ? `Uptime: ${s.uptime}` : 'Tunnel Service'
-            console.log('Cloudflared service found:', s)
           }
         })
+
+        // Also check tunnel config status for richer info
+        try {
+          const tunnelStatus = await tunnelApi.getStatus()
+          if (tunnelStatus.status === 'not_configured') {
+            newServices[1].status = 'inactive'
+            newServices[1].statusLabel = 'Not Configured'
+            newServices[1].detail = 'No tunnel set up'
+          } else if (tunnelStatus.domain) {
+            newServices[1].detail = tunnelStatus.domain
+          }
+        } catch (e) {
+          // tunnel API may fail if not configured
+        }
 
         newServices[2].detail = info.model || 'Linux System'
 
