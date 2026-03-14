@@ -259,7 +259,7 @@ export default function DeployPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-bg-secondary rounded-card border-2 border-accent-lime p-8 mb-6"
+            className="bg-bg-secondary  border-2 border-accent-lime p-8 mb-6"
           >
             <div className="flex items-center gap-3 mb-6">
               <CheckCircle2 size={24} className="text-accent-lime" />
@@ -285,7 +285,7 @@ export default function DeployPage() {
                 </p>
               )}
               {deployResult.outputPath && !deployResult.isBackend && (
-                <div className="mt-4 p-3 bg-bg-primary rounded-lg border border-accent-lime/30">
+                <div className="mt-4 p-3 bg-bg-primary  border border-accent-lime/30">
                   <div className="flex items-center gap-2 mb-1">
                     <Folder size={14} className="text-accent-lime" />
                     <span className="text-text-secondary text-xs">Nginx serve directory:</span>
@@ -306,21 +306,21 @@ export default function DeployPage() {
             <div className="flex gap-3 flex-wrap">
               <Link
                 href="/deployments"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
               >
                 View Deployments &rarr;
               </Link>
               {!deployResult.isBackend && (
                 <Link
                   href="/nginx"
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-bg-primary text-text-primary border border-border-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:border-accent-lime hover:text-accent-lime transition-all"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-bg-primary text-text-primary border border-border-dark font-mono font-bold text-small uppercase tracking-wider  hover:border-accent-lime hover:text-accent-lime transition-all"
                 >
                   <ExternalLink size={14} /> Configure Domain
                 </Link>
               )}
               <button
                 onClick={resetForm}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-bg-primary text-text-primary border border-border-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:border-text-primary transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-bg-primary text-text-primary border border-border-dark font-mono font-bold text-small uppercase tracking-wider  hover:border-text-primary transition-all"
               >
                 Deploy Another
               </button>
@@ -343,7 +343,7 @@ export default function DeployPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-bg-secondary rounded-card border-2 border-red-500/50 p-8 mb-6"
+            className="bg-bg-secondary  border-2 border-red-500/50 p-8 mb-6"
           >
             <div className="flex items-center gap-3 mb-6">
               <XCircle size={24} className="text-red-400" />
@@ -355,13 +355,13 @@ export default function DeployPage() {
             <div className="flex gap-3">
               <button
                 onClick={resetForm}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
               >
                 Try Again
               </button>
               <Link
                 href="/deployments"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-bg-primary text-text-primary border border-border-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:border-text-primary transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-bg-primary text-text-primary border border-border-dark font-mono font-bold text-small uppercase tracking-wider  hover:border-text-primary transition-all"
               >
                 View Deployments
               </Link>
@@ -382,7 +382,7 @@ export default function DeployPage() {
         {(state === 'form' || state === 'building') && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {/* Form */}
-            <div className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden xl:h-fit xl:sticky xl:top-6">
+            <div className="bg-bg-secondary  border border-border-dark overflow-hidden xl:h-fit xl:sticky xl:top-6">
               {/* Header */}
               <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30">
                 <h2 className="font-serif text-h2 mb-2">Deploy from GitHub</h2>
@@ -392,7 +392,7 @@ export default function DeployPage() {
               </div>
 
               {error && (
-                <div className="mx-8 mt-6 p-4 bg-red-900/20 border border-red-800/50 rounded-lg text-red-400 font-mono text-xs flex items-start gap-2">
+                <div className="mx-8 mt-6 p-4 bg-red-900/20 border border-red-800/50  text-red-400 font-mono text-xs flex items-start gap-2">
                   <XCircle size={16} className="flex-shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
@@ -407,13 +407,13 @@ export default function DeployPage() {
                       Project Type
                     </h3>
                   </div>
-                  <div className="flex gap-2 bg-bg-primary rounded-lg p-1.5">
+                  <div className="flex gap-2 bg-bg-primary  p-1.5">
                     {(['frontend', 'backend'] as ProjectType[]).map(type => (
                       <button
                         key={type}
                         onClick={() => setProjectType(type)}
                         disabled={deploying}
-                        className={`flex-1 px-6 py-3 rounded-md font-mono text-small uppercase tracking-wider transition-all ${
+                        className={`flex-1 px-6 py-3 -md font-mono text-small uppercase tracking-wider transition-all ${
                           projectType === type
                             ? 'bg-accent-lime text-text-dark font-bold shadow-lg'
                             : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
@@ -447,7 +447,7 @@ export default function DeployPage() {
                         value={projectName}
                         onChange={e => setProjectName(e.target.value)}
                         disabled={deploying}
-                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                         placeholder="my-awesome-app"
                       />
                       <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
@@ -465,7 +465,7 @@ export default function DeployPage() {
                           value={repoUrl}
                           onChange={e => setRepoUrl(e.target.value)}
                           disabled={deploying}
-                          className="w-full pl-10 pr-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                          className="w-full pl-10 pr-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                           placeholder="https://github.com/user/repo"
                         />
                       </div>
@@ -479,7 +479,7 @@ export default function DeployPage() {
                         value={branch}
                         onChange={e => setBranch(e.target.value)}
                         disabled={deploying}
-                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                         placeholder="main"
                         list="branch-suggestions"
                       />
@@ -499,7 +499,7 @@ export default function DeployPage() {
                         value={workingDir}
                         onChange={e => setWorkingDir(e.target.value)}
                         disabled={deploying}
-                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                         placeholder="(root)"
                       />
                       <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
@@ -528,7 +528,7 @@ export default function DeployPage() {
                             value={buildCmd}
                             onChange={e => setBuildCmd(e.target.value)}
                             disabled={deploying}
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                             placeholder="npm run build"
                           />
                         </div>
@@ -540,7 +540,7 @@ export default function DeployPage() {
                             value={outputDir}
                             onChange={e => setOutputDir(e.target.value)}
                             disabled={deploying}
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                             placeholder="Auto-detect (dist, build, out)"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
@@ -558,7 +558,7 @@ export default function DeployPage() {
                         value={installCmd}
                         onChange={e => setInstallCmd(e.target.value)}
                         disabled={deploying}
-                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                         placeholder="npm install"
                       />
                     </div>
@@ -573,7 +573,7 @@ export default function DeployPage() {
                             value={startCmd}
                             onChange={e => setStartCmd(e.target.value)}
                             disabled={deploying}
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                             placeholder="npm start"
                           />
                         </div>
@@ -586,7 +586,7 @@ export default function DeployPage() {
                             onChange={e => setLocalPort(e.target.value)}
                             disabled={deploying}
                             type="number"
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                             placeholder="3000"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
@@ -627,7 +627,7 @@ export default function DeployPage() {
                             }
                           }}
                           disabled={deploying}
-                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary disabled:opacity-50"
+                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50"
                         >
                           <option value="">-- No domain (skip nginx) --</option>
                           {cloudflareZones.map(zone => (
@@ -646,7 +646,7 @@ export default function DeployPage() {
                               value={subdomain}
                               onChange={(e) => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                               disabled={deploying}
-                              className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
+                              className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
                               placeholder="project-1"
                             />
                             <span className="font-mono text-small text-text-secondary">.{domain}</span>
@@ -675,7 +675,7 @@ export default function DeployPage() {
                           value={domain}
                           onChange={(e) => setDomain(e.target.value)}
                           disabled={deploying}
-                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
+                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
                           placeholder="example.com or subdomain.example.com"
                         />
                       </div>
@@ -755,14 +755,14 @@ export default function DeployPage() {
                   </div>
 
                   {showBulkImport && (
-                    <div className="mb-3 p-3 bg-bg-primary border border-border-dark rounded-lg">
+                    <div className="mb-3 p-3 bg-bg-primary border border-border-dark ">
                       <p className="font-mono text-[10px] text-text-secondary mb-2">
                         Paste .env format (KEY=VALUE per line)
                       </p>
                       <textarea
                         value={bulkContent}
                         onChange={e => setBulkContent(e.target.value)}
-                        className="w-full px-3 py-2 bg-bg-secondary border border-border-dark rounded font-mono text-small text-text-primary mb-2"
+                        className="w-full px-3 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary mb-2"
                         rows={4}
                         placeholder={"DATABASE_URL=postgres://...\nAPI_KEY=abc123\nNODE_ENV=production"}
                         spellCheck={false}
@@ -795,7 +795,7 @@ export default function DeployPage() {
                             setBulkContent('')
                             setShowBulkImport(false)
                           }}
-                          className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold rounded"
+                          className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold "
                         >
                           Import
                         </button>
@@ -813,7 +813,7 @@ export default function DeployPage() {
                           setEnvVars(updated)
                         }}
                         disabled={deploying}
-                        className="w-[35%] px-3 py-2 bg-bg-primary border border-border-dark rounded font-mono text-small text-text-primary disabled:opacity-50"
+                        className="w-[35%] px-3 py-2 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50"
                         placeholder="KEY"
                       />
                       <div className="flex-1 relative">
@@ -826,7 +826,7 @@ export default function DeployPage() {
                             setEnvVars(updated)
                           }}
                           disabled={deploying}
-                          className="w-full px-3 py-2 pr-8 bg-bg-primary border border-border-dark rounded font-mono text-small text-text-primary disabled:opacity-50"
+                          className="w-full px-3 py-2 pr-8 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50"
                           placeholder="VALUE"
                         />
                         <button
@@ -868,7 +868,7 @@ export default function DeployPage() {
                   <button
                     onClick={handleDeploy}
                     disabled={deploying || !repoUrl || !projectName}
-                    className="w-full px-6 py-4 bg-accent-lime text-text-dark font-mono font-bold text-body uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_20px_rgba(170,255,69,0.3)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full px-6 py-4 bg-accent-lime text-text-dark font-mono font-bold text-body uppercase tracking-wider  hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_20px_rgba(170,255,69,0.3)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {deploying ? (
                       <>
@@ -894,7 +894,7 @@ export default function DeployPage() {
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden xl:h-[calc(100vh-8rem)] xl:sticky xl:top-6 flex flex-col"
+                className="bg-bg-secondary  border border-border-dark overflow-hidden xl:h-[calc(100vh-8rem)] xl:sticky xl:top-6 flex flex-col"
               >
                 <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30 flex-shrink-0">
                   <div className="flex items-center gap-2">
@@ -921,7 +921,7 @@ export default function DeployPage() {
 
             {/* Placeholder for right column when not building */}
             {state === 'form' && !currentDeployId && (
-              <div className="hidden xl:flex bg-bg-secondary rounded-card border border-border-dark overflow-hidden items-center justify-center p-12">
+              <div className="hidden xl:flex bg-bg-secondary  border border-border-dark overflow-hidden items-center justify-center p-12">
                 <div className="text-center">
                   <Terminal size={48} className="text-text-secondary/30 mx-auto mb-4" />
                   <p className="font-mono text-small text-text-secondary">

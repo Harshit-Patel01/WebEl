@@ -205,7 +205,7 @@ export default function TunnelDashboardPage() {
           <SectionBadge label="TUNNEL API ACCESS" />
         </div>
 
-        <div className="bg-bg-secondary rounded-card border border-border-dark p-8 md:p-12 text-center">
+        <div className="bg-bg-secondary  border border-border-dark p-8 md:p-12 text-center">
           <div className="max-w-4xl mx-auto">
             <div>
               <Key className="mx-auto mb-6 text-accent-lime" size={48} />
@@ -215,7 +215,7 @@ export default function TunnelDashboardPage() {
               </p>
             </div>
 
-            <div className="mb-8 p-6 bg-bg-primary rounded-lg border border-border-dark text-left">
+            <div className="mb-8 p-6 bg-bg-primary  border border-border-dark text-left">
               <div className="flex items-start gap-4 mb-4">
                 <Key size={24} className="text-accent-lime flex-shrink-0 mt-1" />
                 <div className="flex-1">
@@ -227,7 +227,7 @@ export default function TunnelDashboardPage() {
                     href="https://dash.cloudflare.com/profile/api-tokens"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-accent-lime hover:bg-border-dark transition-all"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-accent-lime hover:bg-border-dark transition-all"
                   >
                     Open Cloudflare Dashboard <ExternalLink size={14} />
                   </a>
@@ -262,14 +262,14 @@ export default function TunnelDashboardPage() {
                 value={inputApiKey}
                 onChange={e => setInputApiKey(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleValidateApiKey()}
-                className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:border-accent-lime focus:outline-none transition-colors"
+                className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:border-accent-lime focus:outline-none transition-colors"
                 placeholder="Paste your API token here"
               />
             </div>
 
             {error && (
               <motion.div
-                className="mb-6 p-4 bg-red-900/20 border border-red-700 rounded-lg flex items-start gap-3"
+                className="mb-6 p-4 bg-red-900/20 border border-red-700  flex items-start gap-3"
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.3 }}
@@ -283,7 +283,7 @@ export default function TunnelDashboardPage() {
               <button
                 onClick={handleValidateApiKey}
                 disabled={validating || !inputApiKey.trim()}
-                className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {validating ? (
                   <>
@@ -328,7 +328,7 @@ export default function TunnelDashboardPage() {
                 loadTunnels(apiKey)
               }
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary hover:bg-border-dark transition-all"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all"
           >
             <RefreshCw size={16} /> Refresh
           </button>
@@ -339,7 +339,7 @@ export default function TunnelDashboardPage() {
                 setApiKey(null)
               }
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary hover:bg-border-dark transition-all"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all"
           >
             <Key size={16} /> Change API Key
           </button>
@@ -350,14 +350,14 @@ export default function TunnelDashboardPage() {
       <div className="mb-6">
         <button
           onClick={handleOpenCreateModal}
-          className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
         >
           <Plus size={16} /> Create New Tunnel
         </button>
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-900/20 border border-red-700 rounded-lg flex items-start gap-3">
+        <div className="mb-6 p-4 bg-red-900/20 border border-red-700  flex items-start gap-3">
           <AlertCircle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
           <div>
             <p className="font-mono text-small text-red-400">{error}</p>
@@ -366,11 +366,11 @@ export default function TunnelDashboardPage() {
       )}
 
       {tunnels.length === 0 ? (
-        <div className="bg-bg-secondary rounded-card border border-border-dark p-12 text-center">
+        <div className="bg-bg-secondary  border border-border-dark p-12 text-center">
           <p className="font-mono text-text-secondary mb-6">No tunnels found in your Cloudflare account.</p>
           <button
             onClick={handleOpenCreateModal}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
           >
             <Plus size={16} /> Create Your First Tunnel
           </button>
@@ -382,14 +382,14 @@ export default function TunnelDashboardPage() {
               key={tunnel.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-bg-secondary rounded-card border border-border-dark p-6 hover:border-accent-lime/30 transition-colors"
+              className="bg-bg-secondary  border border-border-dark p-6 hover:border-accent-lime/30 transition-colors"
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="font-serif text-h3">{tunnel.name}</h3>
                     {tunnel.is_managed && (
-                      <span className="px-2 py-1 bg-accent-lime/20 border border-accent-lime/50 rounded text-[10px] font-mono text-accent-lime uppercase">
+                      <span className="px-2 py-1 bg-accent-lime/20 border border-accent-lime/50  text-[10px] font-mono text-accent-lime uppercase">
                         Managed
                       </span>
                     )}
@@ -410,14 +410,14 @@ export default function TunnelDashboardPage() {
                 <div className="flex items-center gap-2">
                   <Link
                     href={`/tunnel/config?id=${tunnel.id}`}
-                    className="px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all flex items-center gap-2"
+                    className="px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all flex items-center gap-2"
                   >
                     <Settings size={14} />
                     Manage
                   </Link>
                   <button
                     onClick={() => handleDeleteTunnel(tunnel)}
-                    className="p-2 text-text-secondary hover:text-status-error transition-colors rounded hover:bg-bg-primary"
+                    className="p-2 text-text-secondary hover:text-status-error transition-colors  hover:bg-bg-primary"
                     title="Delete tunnel"
                   >
                     <Trash2 size={18} />
@@ -476,7 +476,7 @@ export default function TunnelDashboardPage() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-bg-secondary rounded-card border border-border-dark p-6 w-full max-w-2xl"
+              className="bg-bg-secondary  border border-border-dark p-6 w-full max-w-2xl"
               onClick={e => e.stopPropagation()}
             >
               <h3 className="font-serif text-h3 mb-6">Create New Tunnel</h3>
@@ -489,7 +489,7 @@ export default function TunnelDashboardPage() {
                   <input
                     value={tunnelName}
                     onChange={e => setTunnelName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                     placeholder="my-app-tunnel"
                   />
                 </div>
@@ -502,7 +502,7 @@ export default function TunnelDashboardPage() {
                     <select
                       value={selectedAccount}
                       onChange={e => setSelectedAccount(e.target.value)}
-                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                     >
                       {accounts.map(acc => (
                         <option key={acc.id} value={acc.id}>{acc.name}</option>
@@ -516,7 +516,7 @@ export default function TunnelDashboardPage() {
                     <select
                       value={selectedZone}
                       onChange={e => setSelectedZone(e.target.value)}
-                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                     >
                       {zones.map(z => (
                         <option key={z.id} value={z.id}>{z.name}</option>
@@ -532,7 +532,7 @@ export default function TunnelDashboardPage() {
                   <input
                     value={subdomain}
                     onChange={e => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                     placeholder="app"
                   />
                   {subdomain && selectedZone && (
@@ -544,7 +544,7 @@ export default function TunnelDashboardPage() {
               </div>
 
               {error && (
-                <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-lg flex items-start gap-2">
+                <div className="mb-4 p-3 bg-red-900/20 border border-red-700  flex items-start gap-2">
                   <AlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
                   <span className="font-mono text-small text-red-400">{error}</span>
                 </div>
@@ -554,7 +554,7 @@ export default function TunnelDashboardPage() {
                 <button
                   onClick={handleCreateTunnel}
                   disabled={creating || !tunnelName || !subdomain}
-                  className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {creating ? (
                     <>
@@ -567,7 +567,7 @@ export default function TunnelDashboardPage() {
                 </button>
                 <button
                   onClick={() => setShowCreateModal(false)}
-                  className="px-6 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary hover:bg-border-dark transition-all"
+                  className="px-6 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all"
                 >
                   Cancel
                 </button>

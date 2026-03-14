@@ -294,14 +294,14 @@ export default function DeploymentsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleCleanup}
-              className="px-2 sm:px-3 py-1.5 sm:py-2 bg-bg-secondary text-text-secondary font-mono text-[10px] sm:text-[11px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 bg-bg-secondary text-text-secondary font-mono text-[10px] sm:text-[11px] border border-border-dark  hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
               title="Cleanup orphan containers and fix stale deploys"
             >
               <Activity size={12} className="flex-shrink-0" /> <span className="hidden xs:inline">Cleanup</span>
             </button>
             <Link
               href="/deploy"
-              className="px-2 sm:px-4 py-1.5 sm:py-2 bg-accent-lime text-text-dark font-mono text-[10px] sm:text-[11px] font-bold rounded hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
+              className="px-2 sm:px-4 py-1.5 sm:py-2 bg-accent-lime text-text-dark font-mono text-[10px] sm:text-[11px] font-bold  hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
             >
               <Plus size={12} className="flex-shrink-0" /> <span>New Deploy</span>
             </Link>
@@ -310,7 +310,7 @@ export default function DeploymentsPage() {
 
         {/* Cleanup report notification */}
         {cleanupReport && (
-          <div className="mb-4 p-3 bg-blue-900/20 border border-blue-800/50 rounded-lg font-mono text-xs text-blue-400 flex items-center justify-between">
+          <div className="mb-4 p-3 bg-blue-900/20 border border-blue-800/50  font-mono text-xs text-blue-400 flex items-center justify-between">
             <span>
               Cleanup: {cleanupReport.stale_deploys_fixed} stale deploys fixed, {cleanupReport.orphan_containers_removed} orphan containers removed
             </span>
@@ -323,7 +323,7 @@ export default function DeploymentsPage() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 bg-bg-secondary rounded-card border border-blue-800/50 p-4"
+            className="mb-6 bg-bg-secondary  border border-blue-800/50 p-4"
           >
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -352,14 +352,14 @@ export default function DeploymentsPage() {
 
         <div className="space-y-6">
           {projects.length === 0 ? (
-            <div className="bg-bg-secondary rounded-card border border-border-dark p-12 text-center">
+            <div className="bg-bg-secondary  border border-border-dark p-12 text-center">
               <Package size={48} className="mx-auto mb-4 text-border-dark" />
               <p className="font-mono text-small text-text-secondary mb-4">
                 No deployments yet. Deploy your first project to get started.
               </p>
               <Link
                 href="/deploy"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
               >
                 Deploy Now →
               </Link>
@@ -377,7 +377,7 @@ export default function DeploymentsPage() {
                   key={project.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden"
+                  className="bg-bg-secondary  border border-border-dark overflow-hidden"
                 >
                   {/* Project Header */}
                   <div className="p-6 border-b border-border-dark">
@@ -386,20 +386,20 @@ export default function DeploymentsPage() {
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="font-serif text-h3">{project.name}</h3>
                           {isRunningDeploy && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-blue-900/30 text-blue-400 border border-blue-800/50">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5  text-[10px] bg-blue-900/30 text-blue-400 border border-blue-800/50">
+                              <span className="w-1.5 h-1.5  bg-blue-400 animate-pulse" />
                               Deploying
                             </span>
                           )}
                           {container?.status === 'running' && !isRunningDeploy && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-800/50">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5  text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-800/50">
+                              <span className="w-1.5 h-1.5  bg-emerald-400 animate-pulse" />
                               Running
                             </span>
                           )}
                           {latestDeploy && !isRunningDeploy && !latestDeploy.is_backend && latestDeploy.status === 'success' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-800/50">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5  text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-800/50">
+                              <span className="w-1.5 h-1.5  bg-emerald-400" />
                               Static
                             </span>
                           )}
@@ -427,19 +427,19 @@ export default function DeploymentsPage() {
                       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap">
                         <button
                           onClick={() => { setSelectedProjectId(project.id); setShowEnvModal(true); loadEnvVars(project.id) }}
-                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold rounded hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold  hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
                         >
                           <Key size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Env</span>
                         </button>
                         <button
                           onClick={() => handleRebuild(project.id)}
-                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold rounded hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold  hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
                         >
                           <RefreshCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Rebuild</span>
                         </button>
                         <button
                           onClick={() => handleRedeploy(project.id)}
-                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold rounded hover:bg-accent-lime-muted transition-colors"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold  hover:bg-accent-lime-muted transition-colors"
                         >
                           Deploy
                         </button>
@@ -458,12 +458,12 @@ export default function DeploymentsPage() {
                     <div className="px-6 py-4 bg-bg-primary/50 border-b border-border-dark">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${container.status === 'running' ? 'bg-accent-lime animate-pulse' : container.status === 'unhealthy' ? 'bg-red-400' : 'bg-text-secondary'}`} />
+                          <div className={`w-2 h-2  ${container.status === 'running' ? 'bg-accent-lime animate-pulse' : container.status === 'unhealthy' ? 'bg-red-400' : 'bg-text-secondary'}`} />
                           <span className="font-mono text-[11px] text-text-secondary">Container Status:</span>
                           <span className={`font-mono text-[11px] font-bold ${getStatusColor(container.status)}`}>
                             {container.status.toUpperCase()}
                           </span>
-                          <span className="font-mono text-[10px] text-text-secondary bg-bg-secondary px-2 py-0.5 rounded">
+                          <span className="font-mono text-[10px] text-text-secondary bg-bg-secondary px-2 py-0.5 ">
                             {container.container_id.substring(0, 12)}
                           </span>
                         </div>
@@ -471,7 +471,7 @@ export default function DeploymentsPage() {
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           <button
                             onClick={() => handleViewContainerLogs(container.container_id)}
-                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
                             title="View container logs"
                           >
                             <Terminal size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Logs</span>
@@ -480,14 +480,14 @@ export default function DeploymentsPage() {
                             <>
                               <button
                                 onClick={() => handleRestartContainer(project.id)}
-                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
+                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
                                 title="Restart container"
                               >
                                 <RotateCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Restart</span>
                               </button>
                               <button
                                 onClick={() => handleStopContainer(project.id)}
-                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
+                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
                                 title="Stop container"
                               >
                                 <Square size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Stop</span>
@@ -496,7 +496,7 @@ export default function DeploymentsPage() {
                           ) : (
                             <button
                               onClick={() => handleStartContainer(project.id, container.id)}
-                              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold rounded hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
+                              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold  hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
                               title="Start container"
                             >
                               <Play size={11} className="flex-shrink-0" /> <span>Start</span>
@@ -504,7 +504,7 @@ export default function DeploymentsPage() {
                           )}
                           <button
                             onClick={() => handleRemoveContainer(project.id)}
-                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
                             title="Remove container"
                           >
                             <Trash2 size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Remove</span>
@@ -519,7 +519,7 @@ export default function DeploymentsPage() {
                           return (
                             <div className="flex items-center gap-2 text-[10px] font-mono">
                               <span className="text-text-secondary">Port Mapping:</span>
-                              <span className="bg-bg-secondary px-2 py-1 rounded border border-border-dark">
+                              <span className="bg-bg-secondary px-2 py-1  border border-border-dark">
                                 <span className="text-accent-lime">Host {mapping.host}</span>
                                 <span className="text-text-secondary mx-1">→</span>
                                 <span className="text-cyan-400">Container {mapping.container}</span>
@@ -546,7 +546,7 @@ export default function DeploymentsPage() {
                       )}
                     </div>
                     {projectDeploys.length === 0 ? (
-                      <div className="text-center py-8 bg-bg-primary/30 rounded-lg border border-border-dark">
+                      <div className="text-center py-8 bg-bg-primary/30  border border-border-dark">
                         <Package size={32} className="mx-auto mb-2 text-border-dark" />
                         <p className="font-mono text-[11px] text-text-secondary">No deployments yet</p>
                       </div>
@@ -563,16 +563,16 @@ export default function DeploymentsPage() {
                           return (
                             <div
                               key={deploy.id}
-                              className={`flex items-start justify-between p-4 rounded-lg border ${getStatusBg(deploy.status)} hover:border-accent-lime/50 transition-colors`}
+                              className={`flex items-start justify-between p-4  border ${getStatusBg(deploy.status)} hover:border-accent-lime/50 transition-colors`}
                             >
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                                   <span className={`font-mono text-[11px] font-bold ${getStatusColor(deploy.status)}`}>
-                                    {deploy.status === 'running' && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mr-1 align-middle" />}
+                                    {deploy.status === 'running' && <span className="inline-block w-1.5 h-1.5  bg-blue-400 animate-pulse mr-1 align-middle" />}
                                     {deploy.status.toUpperCase()}
                                   </span>
                                   {deploy.commit_hash && (
-                                    <code className="font-mono text-[10px] text-text-secondary bg-bg-primary px-2 py-0.5 rounded">
+                                    <code className="font-mono text-[10px] text-text-secondary bg-bg-primary px-2 py-0.5 ">
                                       {deploy.commit_hash.substring(0, 7)}
                                     </code>
                                   )}
@@ -582,12 +582,12 @@ export default function DeploymentsPage() {
                                     </span>
                                   )}
                                   {deploy.framework && (
-                                    <span className="font-mono text-[10px] text-accent-lime bg-accent-lime/10 px-2 py-0.5 rounded border border-accent-lime/30">
+                                    <span className="font-mono text-[10px] text-accent-lime bg-accent-lime/10 px-2 py-0.5  border border-accent-lime/30">
                                       {deploy.framework}
                                     </span>
                                   )}
                                   {deploy.is_backend && (
-                                    <span className="font-mono text-[10px] text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded border border-cyan-400/30">
+                                    <span className="font-mono text-[10px] text-cyan-400 bg-cyan-400/10 px-2 py-0.5  border border-cyan-400/30">
                                       Backend
                                     </span>
                                   )}
@@ -607,7 +607,7 @@ export default function DeploymentsPage() {
                                     <Clock size={10} /> {relativeTime(deploy.started_at)}
                                   </span>
                                   {portMapping && (
-                                    <span className="font-mono text-[10px] bg-bg-primary px-2 py-0.5 rounded border border-border-dark">
+                                    <span className="font-mono text-[10px] bg-bg-primary px-2 py-0.5  border border-border-dark">
                                       <span className="text-accent-lime">{portMapping.host}</span>
                                       <span className="text-text-secondary mx-1">→</span>
                                       <span className="text-cyan-400">{portMapping.container}</span>
@@ -620,14 +620,14 @@ export default function DeploymentsPage() {
                                 {deploy.status === 'running' ? (
                                   <button
                                     onClick={() => { setLiveDeployId(deploy.id); setLiveDeployProjectId(project.id) }}
-                                    className="px-3 py-1.5 text-[10px] font-mono font-bold bg-blue-900/30 text-blue-400 border border-blue-800/50 rounded hover:bg-blue-900/50 transition-colors flex items-center gap-1.5"
+                                    className="px-3 py-1.5 text-[10px] font-mono font-bold bg-blue-900/30 text-blue-400 border border-blue-800/50  hover:bg-blue-900/50 transition-colors flex items-center gap-1.5"
                                   >
                                     <Wifi size={12} /> View Live
                                   </button>
                                 ) : (
                                   <button
                                     onClick={() => { setSelectedDeployId(deploy.id); setShowDeployLogs(true) }}
-                                    className="px-3 py-1.5 text-[10px] font-mono bg-bg-secondary text-text-secondary border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1.5"
+                                    className="px-3 py-1.5 text-[10px] font-mono bg-bg-secondary text-text-secondary border border-border-dark  hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1.5"
                                     title="View deployment logs"
                                   >
                                     <Terminal size={12} /> Logs
@@ -655,7 +655,7 @@ export default function DeploymentsPage() {
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-bg-secondary rounded-card border border-border-dark p-6 max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+              className="bg-bg-secondary  border border-border-dark p-6 max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">
@@ -678,14 +678,14 @@ export default function DeploymentsPage() {
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-bg-secondary rounded-card border border-border-dark p-6 max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+              className="bg-bg-secondary  border border-border-dark p-6 max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-serif text-h3">Container Logs</h3>
                 <button onClick={() => setShowContainerLogs(false)} className="text-text-secondary hover:text-text-primary">✕</button>
               </div>
-              <div className="flex-1 overflow-auto bg-bg-primary rounded-lg p-4 font-mono text-[11px]">
+              <div className="flex-1 overflow-auto bg-bg-primary  p-4 font-mono text-[11px]">
                 {containerLogs.map((log, i) => (
                   <div key={i} className="text-text-primary whitespace-pre-wrap">{log}</div>
                 ))}
@@ -703,7 +703,7 @@ export default function DeploymentsPage() {
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-bg-secondary rounded-card border border-border-dark p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+              className="bg-bg-secondary  border border-border-dark p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
@@ -715,13 +715,13 @@ export default function DeploymentsPage() {
 
               <div className="flex-1 overflow-auto space-y-4">
                 {/* Add New */}
-                <div className="bg-bg-primary border border-border-dark rounded-lg p-4">
+                <div className="bg-bg-primary border border-border-dark  p-4">
                   <h4 className="font-mono text-[11px] uppercase tracking-wider text-text-secondary mb-3">Add Variable</h4>
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     <input type="text" value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="KEY"
-                      className="px-3 py-2 bg-bg-secondary border border-border-dark rounded text-text-primary text-sm focus:outline-none focus:border-accent-lime" />
+                      className="px-3 py-2 bg-bg-secondary border border-border-dark  text-text-primary text-sm focus:outline-none focus:border-accent-lime" />
                     <input type="text" value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="value"
-                      className="px-3 py-2 bg-bg-secondary border border-border-dark rounded text-text-primary text-sm focus:outline-none focus:border-accent-lime" />
+                      className="px-3 py-2 bg-bg-secondary border border-border-dark  text-text-primary text-sm focus:outline-none focus:border-accent-lime" />
                   </div>
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
@@ -729,14 +729,14 @@ export default function DeploymentsPage() {
                       Secret
                     </label>
                     <button onClick={createEnvVar} disabled={!newKey || !newValue}
-                      className="ml-auto px-4 py-2 bg-accent-lime text-bg-primary rounded hover:bg-accent-lime/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-bold transition-colors">
+                      className="ml-auto px-4 py-2 bg-accent-lime text-bg-primary  hover:bg-accent-lime/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-bold transition-colors">
                       <Plus size={16} /> Add
                     </button>
                   </div>
                 </div>
 
                 {/* Bulk Import */}
-                <div className="bg-bg-primary border border-border-dark rounded-lg p-4">
+                <div className="bg-bg-primary border border-border-dark  p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-mono text-[11px] uppercase tracking-wider text-text-secondary">Bulk Import</h4>
                     <button onClick={() => setShowBulkImport(!showBulkImport)}
@@ -748,9 +748,9 @@ export default function DeploymentsPage() {
                     <>
                       <textarea value={bulkContent} onChange={e => setBulkContent(e.target.value)}
                         placeholder={"KEY=value\nAPI_KEY=abc123"} rows={4}
-                        className="w-full px-3 py-2 bg-bg-secondary border border-border-dark rounded text-text-primary font-mono text-sm focus:outline-none focus:border-accent-lime mb-3" />
+                        className="w-full px-3 py-2 bg-bg-secondary border border-border-dark  text-text-primary font-mono text-sm focus:outline-none focus:border-accent-lime mb-3" />
                       <button onClick={bulkImport} disabled={!bulkContent.trim()}
-                        className="px-4 py-2 bg-accent-lime text-bg-primary rounded hover:bg-accent-lime/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-bold transition-colors">
+                        className="px-4 py-2 bg-accent-lime text-bg-primary  hover:bg-accent-lime/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-bold transition-colors">
                         <Upload size={16} /> Import
                       </button>
                     </>
@@ -758,7 +758,7 @@ export default function DeploymentsPage() {
                 </div>
 
                 {/* Variables List */}
-                <div className="bg-bg-primary border border-border-dark rounded-lg overflow-hidden">
+                <div className="bg-bg-primary border border-border-dark  overflow-hidden">
                   <div className="p-4 border-b border-border-dark">
                     <h4 className="font-mono text-[11px] uppercase tracking-wider text-text-secondary">
                       Variables ({envVars.length})
@@ -775,7 +775,7 @@ export default function DeploymentsPage() {
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="font-mono text-sm font-semibold text-accent-lime">{envVar.key}</span>
                                 {envVar.is_secret && (
-                                  <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-500 text-xs rounded">Secret</span>
+                                  <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-500 text-xs ">Secret</span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
@@ -801,7 +801,7 @@ export default function DeploymentsPage() {
                   )}
                 </div>
 
-                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <div className="p-3 bg-blue-500/10 border border-blue-500/30 ">
                   <p className="text-sm text-blue-400">
                     <strong>Note:</strong> Rebuild the project after modifying variables to apply changes.
                   </p>

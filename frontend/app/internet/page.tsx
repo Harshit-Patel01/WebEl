@@ -95,22 +95,22 @@ export default function InternetPage() {
         </div>
 
         <div className="max-w-lg mx-auto">
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-8 text-center">
+          <div className="bg-bg-secondary  border border-border-dark p-8 text-center">
             {/* Animated circles */}
             <div className="relative w-32 h-32 mx-auto mb-8">
               {[1, 2, 3].map(ring => (
                 <motion.div
                   key={ring}
-                  className="absolute inset-0 rounded-full border border-accent-lime"
+                  className="absolute inset-0  border border-accent-lime"
                   initial={{ scale: 0.5, opacity: 0.8 }}
                   animate={{
-                    scale: [0.5, 1 + ring * 0.3],
+                    scale: [0.5, 1 + ring * 0.1],
                     opacity: [0.6, 0],
                   }}
                   transition={{
                     duration: 2,
                     repeat: state === 'checking' ? Infinity : 0,
-                    delay: ring * 0.4,
+                    delay: ring * 0.2,
                     ease: 'easeOut',
                   }}
                 />
@@ -125,7 +125,7 @@ export default function InternetPage() {
                     <CheckCircle2 size={48} className="text-accent-lime" />
                   </motion.div>
                 ) : (
-                  <div className="w-4 h-4 rounded-full bg-accent-lime animate-pulse" />
+                  <div className="w-4 h-4  bg-accent-lime animate-pulse" />
                 )}
               </div>
             </div>
@@ -148,7 +148,7 @@ export default function InternetPage() {
             </AnimatePresence>
 
             {/* Results readout */}
-            <div className="bg-bg-primary rounded-lg p-4 text-left font-mono text-small space-y-2">
+            <div className="bg-bg-primary  p-4 text-left font-mono text-small space-y-2">
               {checks.map((check, i) => (
                 <motion.div
                   key={check.label}
@@ -185,7 +185,7 @@ export default function InternetPage() {
               >
                 <Link
                   href="/tunnel/dashboard"
-                  className="inline-flex items-center gap-2 mt-8 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-full hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_20px_rgba(170,255,69,0.3)]"
+                  className="inline-flex items-center gap-2 mt-8 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_20px_rgba(170,255,69,0.3)]"
                 >
                   Proceed to Cloudflare Tunnel Setup &rarr;
                 </Link>
@@ -201,7 +201,7 @@ export default function InternetPage() {
               >
                 <button
                   onClick={runChecks}
-                  className="inline-flex items-center gap-2 mt-8 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-full hover:bg-accent-lime-muted transition-all"
+                  className="inline-flex items-center gap-2 mt-8 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
                 >
                   Retry Checks
                 </button>

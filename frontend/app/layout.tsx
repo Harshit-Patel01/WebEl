@@ -37,7 +37,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center dot-pattern">
       <div className="max-w-md w-full mx-4">
-        <div className="bg-bg-secondary rounded-2xl border border-border-dark p-8">
+        <div className="bg-bg-secondary  border border-border-dark p-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-3 mb-4">
               <img src="/favicon.svg" alt="OpenDeploy" className="w-10 h-10" />
@@ -57,7 +57,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Enter your password"
                 autoFocus
-                className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
               />
             </div>
             {error && (
@@ -66,7 +66,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             <button
               type="submit"
               disabled={loading || !password}
-              className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? <><Loader2 size={16} className="animate-spin" /> Signing in...</> : 'Sign In'}
             </button>
@@ -118,7 +118,7 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center dot-pattern">
       <div className="max-w-md w-full mx-4">
-        <div className="bg-bg-secondary rounded-2xl border border-border-dark p-8">
+        <div className="bg-bg-secondary  border border-border-dark p-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-3 mb-4">
               <img src="/favicon.svg" alt="OpenDeploy" className="w-10 h-10" />
@@ -138,7 +138,7 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Create a password (min 6 chars)"
                 autoFocus
-                className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
               />
               <button
                 type="button"
@@ -154,7 +154,7 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               placeholder="Confirm password"
-              className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+              className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
             />
             {error && (
               <p className="font-mono text-[11px] text-status-error">{error}</p>
@@ -162,14 +162,14 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
             <button
               type="submit"
               disabled={loading || !password || !confirmPassword}
-              className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? <><Loader2 size={16} className="animate-spin" /> Setting up...</> : 'Set Password'}
             </button>
             <button
               type="button"
               onClick={handleSkip}
-              className="w-full px-6 py-2.5 bg-transparent border border-border-dark text-text-secondary font-mono text-small uppercase tracking-wider rounded-lg hover:text-text-primary hover:border-border-light transition-all"
+              className="w-full px-6 py-2.5 bg-transparent border border-border-dark text-text-secondary font-mono text-small uppercase tracking-wider  hover:text-text-primary hover:border-border-light transition-all"
             >
               Skip for now
             </button>

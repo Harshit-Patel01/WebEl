@@ -16,7 +16,7 @@ export default function BuildProgress({ currentPhase, phases = defaultPhases }: 
             <div className="flex items-center w-full">
               <div
                 className={`
-                  h-1.5 flex-1 rounded-full transition-all duration-500
+                  h-1.5 flex-1  transition-all duration-500
                   ${i < currentPhase ? 'bg-accent-lime' : i === currentPhase ? 'bg-accent-lime animate-pulse' : 'bg-border-dark'}
                 `}
               />

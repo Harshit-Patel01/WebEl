@@ -47,13 +47,13 @@ export default function CodePreview({ code, title }: CodePreviewProps) {
   }
 
   return (
-    <div className="bg-bg-surface text-text-dark border border-border-light rounded-card overflow-hidden">
+    <div className="bg-bg-surface text-text-dark border border-border-light  overflow-hidden">
       {title && (
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-light">
           <span className="font-mono text-small font-bold uppercase tracking-wider">{title}</span>
           <button
             onClick={handleCopy}
-            className="p-1.5 hover:bg-gray-200 rounded transition-colors"
+            className="p-1.5 hover:bg-gray-200  transition-colors"
           >
             {copied ? <Check size={14} className="text-accent-lime-muted" /> : <Copy size={14} />}
           </button>

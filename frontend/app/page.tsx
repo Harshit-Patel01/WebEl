@@ -54,7 +54,7 @@ export default function WelcomePage() {
         >
           <Link
             href="/wifi"
-            className="inline-flex items-center gap-2 px-8 py-4 bg-accent-lime text-text-dark font-mono font-bold text-body uppercase tracking-wider rounded-full hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_30px_rgba(170,255,69,0.3)] active:scale-95"
+            className="inline-flex items-center gap-2 px-8 py-4 bg-accent-lime text-text-dark font-mono font-bold text-body uppercase tracking-wider  hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_30px_rgba(170,255,69,0.3)] active:scale-95"
           >
             Begin Setup <span className="text-xl">&rarr;</span>
           </Link>

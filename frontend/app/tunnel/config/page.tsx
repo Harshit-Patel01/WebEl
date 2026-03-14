@@ -312,7 +312,7 @@ function TunnelConfigContent() {
       <div className="mb-8 flex items-center justify-between">
         <Link
           href="/tunnel/dashboard"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary hover:bg-border-dark transition-all"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all"
         >
           <ArrowLeft size={16} />
           Back to Dashboard
@@ -324,7 +324,7 @@ function TunnelConfigContent() {
       </div>
 
       {/* Tunnel Status Header */}
-      <div className="bg-bg-secondary rounded-card border border-border-dark p-6 mb-8">
+      <div className="bg-bg-secondary  border border-border-dark p-6 mb-8">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-serif text-h2 text-text-primary mb-2">
@@ -343,14 +343,14 @@ function TunnelConfigContent() {
             />
             <button
               onClick={handleRestart}
-              className="px-4 py-2 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary hover:bg-border-dark transition-all flex items-center gap-2"
+              className="px-4 py-2 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all flex items-center gap-2"
             >
               <RefreshCw size={14} />
               Restart
             </button>
             <button
               onClick={handleStop}
-              className="px-4 py-2 bg-red-900/20 border border-red-700 rounded-lg font-mono text-small text-red-400 hover:bg-red-900/40 transition-all"
+              className="px-4 py-2 bg-red-900/20 border border-red-700  font-mono text-small text-red-400 hover:bg-red-900/40 transition-all"
             >
               Stop
             </button>
@@ -380,7 +380,7 @@ function TunnelConfigContent() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 bg-yellow-900/20 border border-yellow-700 rounded-lg"
+          className="mb-6 p-4 bg-yellow-900/20 border border-yellow-700 "
         >
           <div className="flex items-start gap-3">
             <AlertCircle size={20} className="text-yellow-500 flex-shrink-0 mt-0.5" />
@@ -404,7 +404,7 @@ function TunnelConfigContent() {
               <button
                 onClick={checkConfigDrift}
                 disabled={checkingDrift}
-                className="px-4 py-2 bg-yellow-700 text-yellow-100 font-mono text-small rounded-lg hover:bg-yellow-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-2 bg-yellow-700 text-yellow-100 font-mono text-small  hover:bg-yellow-600 transition-all disabled:opacity-50 flex items-center gap-2"
               >
                 {checkingDrift ? (
                   <>
@@ -428,7 +428,7 @@ function TunnelConfigContent() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 bg-red-900/20 border border-red-700 rounded-lg flex items-start gap-3"
+          className="mb-6 p-4 bg-red-900/20 border border-red-700  flex items-start gap-3"
         >
           <AlertCircle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -444,7 +444,7 @@ function TunnelConfigContent() {
       )}
 
       {/* Traffic Routes Section */}
-      <div className="bg-bg-secondary rounded-card border border-border-dark p-6 mb-8">
+      <div className="bg-bg-secondary  border border-border-dark p-6 mb-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-serif text-h2 text-text-primary">Traffic Routes</h2>
           <button
@@ -454,7 +454,7 @@ function TunnelConfigContent() {
                 loadZones()
               }
             }}
-            className="px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all flex items-center gap-2"
+            className="px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all flex items-center gap-2"
           >
             <Plus size={16} />
             Add Route
@@ -468,7 +468,7 @@ function TunnelConfigContent() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mb-6 p-6 bg-bg-primary rounded-lg border border-border-dark"
+              className="mb-6 p-6 bg-bg-primary  border border-border-dark"
             >
               <h3 className="font-mono text-small font-bold uppercase tracking-wider text-text-primary mb-4">
                 Add New Route
@@ -482,7 +482,7 @@ function TunnelConfigContent() {
                   <select
                     value={selectedZone}
                     onChange={e => setSelectedZone(e.target.value)}
-                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary"
                   >
                     {zones.length === 0 && <option value="">Loading zones...</option>}
                     {zones.map(z => (
@@ -497,7 +497,7 @@ function TunnelConfigContent() {
                   <input
                     value={subdomain}
                     onChange={e => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary"
                     placeholder="api"
                   />
                   {subdomain && (
@@ -517,7 +517,7 @@ function TunnelConfigContent() {
                     type="number"
                     value={localPort}
                     onChange={e => handlePortChange(e.target.value)}
-                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary"
                     placeholder="3000"
                     min="1"
                     max="65535"
@@ -548,7 +548,7 @@ function TunnelConfigContent() {
                   <select
                     value={localScheme}
                     onChange={e => setLocalScheme(e.target.value)}
-                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary"
                   >
                     <option value="http">HTTP</option>
                     <option value="https">HTTPS</option>
@@ -563,7 +563,7 @@ function TunnelConfigContent() {
                 <input
                   value={pathPrefix}
                   onChange={e => setPathPrefix(e.target.value)}
-                  className="w-full px-4 py-3 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                  className="w-full px-4 py-3 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary"
                   placeholder="/api"
                 />
                 <p className="mt-1 font-mono text-label text-text-secondary">
@@ -575,7 +575,7 @@ function TunnelConfigContent() {
                 <button
                   onClick={handleAddRoute}
                   disabled={submitting || !subdomain || !localPort || zones.length === 0}
-                  className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {submitting ? (
                     <>
@@ -588,7 +588,7 @@ function TunnelConfigContent() {
                 </button>
                 <button
                   onClick={() => setShowAddForm(false)}
-                  className="px-6 py-3 bg-bg-secondary border border-border-dark rounded-lg font-mono text-small text-text-primary hover:bg-border-dark transition-all"
+                  className="px-6 py-3 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all"
                 >
                   Cancel
                 </button>
@@ -605,7 +605,7 @@ function TunnelConfigContent() {
             </p>
             <button
               onClick={() => setShowAddForm(true)}
-              className="px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+              className="px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
             >
               Add Your First Route
             </button>
@@ -617,7 +617,7 @@ function TunnelConfigContent() {
                 key={route.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-4 bg-bg-primary rounded-lg border border-border-dark hover:border-accent-lime transition-all"
+                className="p-4 bg-bg-primary  border border-border-dark hover:border-accent-lime transition-all"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
@@ -658,7 +658,7 @@ function TunnelConfigContent() {
                     <button
                       onClick={() => handleMoveRoute(index, 'up')}
                       disabled={index === 0}
-                      className="p-2 bg-bg-secondary border border-border-dark rounded-lg hover:bg-border-dark transition-all disabled:opacity-30"
+                      className="p-2 bg-bg-secondary border border-border-dark  hover:bg-border-dark transition-all disabled:opacity-30"
                       title="Move up"
                     >
                       <ArrowUp size={14} className="text-text-primary" />
@@ -666,14 +666,14 @@ function TunnelConfigContent() {
                     <button
                       onClick={() => handleMoveRoute(index, 'down')}
                       disabled={index === routes.length - 1}
-                      className="p-2 bg-bg-secondary border border-border-dark rounded-lg hover:bg-border-dark transition-all disabled:opacity-30"
+                      className="p-2 bg-bg-secondary border border-border-dark  hover:bg-border-dark transition-all disabled:opacity-30"
                       title="Move down"
                     >
                       <ArrowDown size={14} className="text-text-primary" />
                     </button>
                     <button
                       onClick={() => handleDeleteRoute(route.id, route.hostname)}
-                      className="p-2 bg-red-900/20 border border-red-700 rounded-lg hover:bg-red-900/40 transition-all"
+                      className="p-2 bg-red-900/20 border border-red-700  hover:bg-red-900/40 transition-all"
                       title="Delete route"
                     >
                       <Trash2 size={14} className="text-red-400" />
@@ -684,7 +684,7 @@ function TunnelConfigContent() {
             ))}
 
             {/* Catch-all Rule */}
-            <div className="p-4 bg-bg-secondary/50 rounded-lg border border-border-dark/50">
+            <div className="p-4 bg-bg-secondary/50  border border-border-dark/50">
               <div className="flex items-center gap-3">
                 <span className="font-mono text-small text-text-secondary">
                   Default — returns 404 for unmatched requests

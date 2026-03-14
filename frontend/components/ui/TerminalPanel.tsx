@@ -41,7 +41,7 @@ export default function TerminalPanel({ lines, streaming = false, maxHeight = '4
   return (
     <div
       ref={containerRef}
-      className="bg-bg-primary border border-border-dark rounded-card p-4 overflow-auto font-mono text-small"
+      className="bg-bg-primary border border-border-dark  p-4 overflow-auto font-mono text-small"
       style={{ maxHeight }}
     >
       {visibleLines.map((line, i) => {

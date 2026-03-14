@@ -49,7 +49,7 @@ export default function WifiRow({ ssid, signal, secured, saved = false, selected
         )}
         <button
           className={`
-            font-mono text-label uppercase tracking-wider px-3 py-1 rounded-full
+            font-mono text-label uppercase tracking-wider px-3 py-1 
             transition-all opacity-0 group-hover:opacity-100
             ${selected ? 'opacity-100' : ''}
             bg-accent-lime text-text-dark hover:bg-accent-lime-muted
