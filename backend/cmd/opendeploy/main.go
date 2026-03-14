@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -94,29 +95,24 @@ func main() {
 	// Start system stats broadcaster
 	go hub.StartStatsBroadcaster(5 * time.Second)
 
-	// Start WiFi monitor for fallback AP
+	// Initialize WiFi service and AP
 	wifiSvc := services.NewWifiService(runner, logger, db)
-	wifiMonitor := services.NewWifiMonitor(runner, wifiSvc, logger)
-	wifiSvc.SetWifiMonitor(wifiMonitor) // Set the WifiMonitor after both are created
+	wifiAP := services.NewWifiAP(runner, logger, db)
 
-	// Ensure Avahi is configured and running for hostname resolution
+	// Run startup health checks and self-healing
 	avahiSvc := services.NewAvahiService(runner, logger)
-	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := avahiSvc.EnsureOptimalConfig(startupCtx); err != nil {
-		logger.Warn("Failed to configure Avahi at startup", zap.Error(err))
-	}
-	if err := avahiSvc.RefreshHostname(startupCtx); err != nil {
-		logger.Warn("Failed to start Avahi at startup", zap.Error(err))
-	} else {
-		logger.Info("Avahi hostname service initialized - device accessible via hostname.local")
-	}
-	cancelStartup()
+	go runStartupHealthChecks(logger, runner, avahiSvc, wifiSvc)
 
-	monitorCtx, cancelMonitor := context.WithCancel(context.Background())
-	go wifiMonitor.Start(monitorCtx)
+	// Ensure AP is running on startup (idempotent)
+	apCtx, cancelAP := context.WithCancel(context.Background())
+	go func() {
+		// Wait for system to stabilize before starting AP
+		time.Sleep(5 * time.Second)
+		wifiAP.EnsureAP(apCtx)
+	}()
 
 	// Build router
-	router := api.NewRouter(cfg, db, hub, runner, logger, wifiMonitor)
+	router := api.NewRouter(cfg, db, hub, runner, logger, wifiAP)
 
 	// HTTP server — WriteTimeout is set high to support SSE streaming connections
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -145,8 +141,8 @@ func main() {
 	<-done
 	logger.Info("shutting down...")
 
-	// Stop WiFi monitor
-	cancelMonitor()
+	// Stop AP service
+	cancelAP()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -196,4 +192,106 @@ func initLogger(level string) *zap.Logger {
 		panic(fmt.Sprintf("failed to initialize logger: %v", err))
 	}
 	return logger
+}
+
+// runStartupHealthChecks performs self-healing checks on startup
+func runStartupHealthChecks(logger *zap.Logger, runner *exec.Runner, avahiSvc *services.AvahiService, wifiSvc *services.WifiService) {
+	logger.Info("Starting system health checks and self-healing")
+
+	// Wait a bit for system to stabilize
+	time.Sleep(3 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// 1. Check Avahi daemon status (don't restart it)
+	logger.Info("Checking Avahi daemon status")
+	avahiResult, _ := runner.Run(ctx, exec.RunOpts{
+		JobType: "check_avahi",
+		Command: "sudo",
+		Args:    []string{"systemctl", "is-active", "avahi-daemon"},
+		Timeout: 5 * time.Second,
+	})
+
+	avahiActive := false
+	if avahiResult != nil && len(avahiResult.Lines) > 0 {
+		for _, line := range avahiResult.Lines {
+			if line.Stream == "stdout" && strings.TrimSpace(line.Text) == "active" {
+				avahiActive = true
+				break
+			}
+		}
+	}
+
+	if avahiActive {
+		logger.Info("Avahi daemon is active - hostname resolution available")
+		// Only configure if needed, don't restart or refresh
+		if err := avahiSvc.EnsureOptimalConfig(ctx); err != nil {
+			logger.Warn("Failed to configure Avahi", zap.Error(err))
+		}
+	} else {
+		logger.Warn("Avahi daemon not active - hostname resolution may not work")
+		logger.Info("To enable hostname resolution, run: sudo systemctl start avahi-daemon")
+	}
+
+	// 2. Check WiFi status
+	logger.Info("Checking WiFi connectivity")
+	wifiStatus, err := wifiSvc.GetStatus(ctx)
+	if err != nil {
+		logger.Warn("Failed to get WiFi status", zap.Error(err))
+	} else if wifiStatus.Connected {
+		logger.Info("WiFi connected",
+			zap.String("ssid", wifiStatus.SSID),
+			zap.String("ip", wifiStatus.IP))
+	} else {
+		logger.Info("WiFi not connected - WiFi monitor will handle AP fallback if needed")
+	}
+
+	// 3. Check NetworkManager status
+	logger.Info("Checking NetworkManager status")
+	nmResult, _ := runner.Run(ctx, exec.RunOpts{
+		JobType: "check_nm",
+		Command: "sudo",
+		Args:    []string{"systemctl", "is-active", "NetworkManager"},
+		Timeout: 5 * time.Second,
+	})
+
+	nmActive := false
+	if nmResult != nil && len(nmResult.Lines) > 0 {
+		for _, line := range nmResult.Lines {
+			if line.Stream == "stdout" && strings.TrimSpace(line.Text) == "active" {
+				nmActive = true
+				break
+			}
+		}
+	}
+
+	if !nmActive {
+		logger.Warn("NetworkManager not active, attempting to start")
+		_, err := runner.Run(ctx, exec.RunOpts{
+			JobType: "start_nm",
+			Command: "sudo",
+			Args:    []string{"systemctl", "start", "NetworkManager"},
+			Timeout: 10 * time.Second,
+		})
+		if err != nil {
+			logger.Error("Failed to start NetworkManager", zap.Error(err))
+		} else {
+			logger.Info("NetworkManager started successfully")
+		}
+	}
+
+	// 4. Ensure wlan0 is managed by NetworkManager
+	logger.Info("Ensuring wlan0 is managed by NetworkManager")
+	_, err = runner.Run(ctx, exec.RunOpts{
+		JobType: "nm_manage_wlan0",
+		Command: "sudo",
+		Args:    []string{"nmcli", "device", "set", "wlan0", "managed", "yes"},
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		logger.Warn("Failed to set wlan0 as managed", zap.Error(err))
+	}
+
+	logger.Info("System health checks completed - backend is ready and self-sufficient")
 }
