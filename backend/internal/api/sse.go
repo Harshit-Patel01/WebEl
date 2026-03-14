@@ -29,6 +29,7 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 	// Verify deploy exists
 	deploy, err := h.db.GetDeploy(deployID)
 	if err != nil {
+		h.logger.Error("failed to get deploy", zap.String("deployId", deployID), zap.Error(err))
 		http.Error(w, "failed to get deploy", http.StatusInternalServerError)
 		return
 	}
@@ -61,7 +62,9 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 	// Send all existing logs first (catch-up)
 	existingLogs, err := h.db.ListDeployLogs(deployID, 10000, 0)
 	if err != nil {
-		h.logger.Error("failed to list existing logs", zap.Error(err))
+		h.logger.Error("failed to list existing logs", zap.String("deployId", deployID), zap.Error(err))
+		// Don't return error here, just log it and continue
+		existingLogs = []state.DeployLog{}
 	}
 
 	var lastTimestamp time.Time
@@ -119,6 +122,7 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if err != nil {
+				h.logger.Warn("failed to poll logs", zap.String("deployId", deployID), zap.Error(err))
 				continue
 			}
 
@@ -140,6 +144,7 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 			// Check if deploy is complete
 			deploy, err = h.db.GetDeploy(deployID)
 			if err != nil {
+				h.logger.Warn("failed to get deploy status", zap.String("deployId", deployID), zap.Error(err))
 				continue
 			}
 
