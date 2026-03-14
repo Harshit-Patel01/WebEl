@@ -136,3 +136,4 @@ deploy.sh
 
 # Project specific
 backend/static/frontend/
+CLAUDE.md
