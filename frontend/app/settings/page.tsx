@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Monitor, Wifi, Shield, Palette, Info } from 'lucide-react'
+import { Monitor, Wifi, Shield, Palette, Info, Eye, EyeOff, Trash2, Plus, CheckCircle2, AlertCircle, LogOut } from 'lucide-react'
 import SectionBadge from '@/components/ui/SectionBadge'
-import { systemApi, authApi, wifiApi } from '@/lib/api'
+import { systemApi, authApi, wifiApi, tunnelApi } from '@/lib/api'
+import { apiKeyStorage } from '@/utils/apiKey'
 
 type SettingsSection = 'system' | 'network' | 'security' | 'appearance' | 'about'
 
@@ -20,11 +21,25 @@ export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>('system')
   const [theme, setTheme] = useState<'dark' | 'light' | 'auto'>('dark')
   const [lanOnly, setLanOnly] = useState(false)
-  const [password, setPassword] = useState('')
+
+  // Password state
+  const [passwordSet, setPasswordSet] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [tokenVisible, setTokenVisible] = useState(false)
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [setupPassword, setSetupPassword] = useState('')
+  const [setupConfirm, setSetupConfirm] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
   const [passwordLoading, setPasswordLoading] = useState(false)
-  const [passwordMessage, setPasswordMessage] = useState('')
+  const [passwordMessage, setPasswordMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  // API Key state
+  const [cfApiKey, setCfApiKey] = useState('')
+  const [newApiKey, setNewApiKey] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [apiKeyLoading, setApiKeyLoading] = useState(false)
+  const [apiKeyMessage, setApiKeyMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
 
   const [systemInfo, setSystemInfo] = useState<any>(null)
   const [systemStats, setSystemStats] = useState<any>(null)
@@ -39,23 +54,38 @@ export default function SettingsPage() {
     }
   }, [])
 
-  // Apply theme to document
+  // Load API key from localStorage
+  useEffect(() => {
+    const stored = apiKeyStorage.get()
+    if (stored) {
+      setCfApiKey(stored)
+    }
+  }, [])
+
+  // Check auth status
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const status = await authApi.getStatus()
+        setPasswordSet(status.password_set)
+      } catch (err) {
+        console.error('Failed to check auth status:', err)
+      }
+    }
+    checkAuth()
+  }, [])
+
   const applyTheme = (selectedTheme: 'dark' | 'light' | 'auto') => {
     const root = document.documentElement
-
     if (selectedTheme === 'auto') {
-      // Use system preference
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
       root.setAttribute('data-theme', prefersDark ? 'dark' : 'light')
     } else {
       root.setAttribute('data-theme', selectedTheme)
     }
-
-    // Save to localStorage
     localStorage.setItem('theme', selectedTheme)
   }
 
-  // Handle theme change
   const handleThemeChange = (newTheme: 'dark' | 'light' | 'auto') => {
     setTheme(newTheme)
     applyTheme(newTheme)
@@ -77,20 +107,99 @@ export default function SettingsPage() {
     fetchSystemData()
   }, [])
 
-  const handlePasswordChange = async () => {
-    if (!password || !newPassword) return
+  // Handle setting initial password
+  const handleSetupPassword = async () => {
+    if (!setupPassword || !setupConfirm) return
+    if (setupPassword !== setupConfirm) {
+      setPasswordMessage({ text: 'Passwords do not match', type: 'error' })
+      return
+    }
+    if (setupPassword.length < 6) {
+      setPasswordMessage({ text: 'Password must be at least 6 characters', type: 'error' })
+      return
+    }
     setPasswordLoading(true)
-    setPasswordMessage('')
+    setPasswordMessage(null)
     try {
-      await authApi.changePassword({ current_password: password, new_password: newPassword })
-      setPasswordMessage('Password updated successfully')
-      setPassword('')
-      setNewPassword('')
+      await authApi.setupPassword(setupPassword)
+      setPasswordMessage({ text: 'Password created successfully', type: 'success' })
+      setPasswordSet(true)
+      setSetupPassword('')
+      setSetupConfirm('')
     } catch (err: any) {
-      setPasswordMessage(err.message || 'Failed to update password')
+      setPasswordMessage({ text: err.message || 'Failed to set password', type: 'error' })
     } finally {
       setPasswordLoading(false)
     }
+  }
+
+  // Handle changing existing password
+  const handlePasswordChange = async () => {
+    if (!currentPassword || !newPassword) return
+    if (newPassword !== confirmNewPassword) {
+      setPasswordMessage({ text: 'New passwords do not match', type: 'error' })
+      return
+    }
+    if (newPassword.length < 6) {
+      setPasswordMessage({ text: 'Password must be at least 6 characters', type: 'error' })
+      return
+    }
+    setPasswordLoading(true)
+    setPasswordMessage(null)
+    try {
+      await authApi.changePassword({ current_password: currentPassword, new_password: newPassword })
+      setPasswordMessage({ text: 'Password updated successfully', type: 'success' })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+    } catch (err: any) {
+      setPasswordMessage({ text: err.message || 'Failed to update password', type: 'error' })
+    } finally {
+      setPasswordLoading(false)
+    }
+  }
+
+  // Handle adding a new Cloudflare API key
+  const handleAddApiKey = async () => {
+    if (!newApiKey) return
+    setApiKeyLoading(true)
+    setApiKeyMessage(null)
+    try {
+      // Validate the token with Cloudflare
+      const result = await tunnelApi.validateToken(newApiKey)
+      if (result.valid) {
+        apiKeyStorage.set(newApiKey)
+        setCfApiKey(newApiKey)
+        setNewApiKey('')
+        setApiKeyMessage({ text: 'API token saved and validated successfully', type: 'success' })
+      } else {
+        setApiKeyMessage({ text: `Token validation failed: ${result.status}`, type: 'error' })
+      }
+    } catch (err: any) {
+      setApiKeyMessage({ text: err.message || 'Failed to validate API token', type: 'error' })
+    } finally {
+      setApiKeyLoading(false)
+    }
+  }
+
+  // Handle deleting the API key
+  const handleDeleteApiKey = () => {
+    if (!confirm('Are you sure you want to remove the stored Cloudflare API token?')) return
+    apiKeyStorage.clear()
+    setCfApiKey('')
+    setShowApiKey(false)
+    setApiKeyMessage({ text: 'API token removed', type: 'success' })
+  }
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch (err) {
+      console.error('Logout failed:', err)
+    }
+    // Dispatch event so layout.tsx can switch to login screen
+    window.dispatchEvent(new Event('opendeploy-logout'))
   }
 
   return (
@@ -175,39 +284,142 @@ export default function SettingsPage() {
                   <h2 className="font-serif text-h2 mb-6">Security</h2>
 
                   <div className="space-y-8">
-                    {/* Change password */}
-                    <div>
-                      <h3 className="font-mono text-label uppercase tracking-wider text-text-secondary mb-4">
-                        Change Dashboard Password
-                      </h3>
-                      <div className="space-y-3 max-w-md">
-                        <input
-                          type="password"
-                          value={password}
-                          onChange={e => setPassword(e.target.value)}
-                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
-                          placeholder="Current password"
-                        />
-                        <input
-                          type="password"
-                          value={newPassword}
-                          onChange={e => setNewPassword(e.target.value)}
-                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
-                          placeholder="New password"
-                        />
-                        <button
-                          onClick={handlePasswordChange}
-                          disabled={passwordLoading || !password || !newPassword}
-                          className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
-                        >
-                          {passwordLoading ? 'Updating...' : 'Update Password'}
-                        </button>
-                        {passwordMessage && (
-                          <p className={`font-mono text-[11px] ${passwordMessage.includes('Failed') ? 'text-status-error' : 'text-accent-lime'}`}>
-                            {passwordMessage}
-                          </p>
-                        )}
+                    {/* Password Section */}
+                    {!passwordSet ? (
+                      <div>
+                        <h3 className="font-mono text-label uppercase tracking-wider text-text-secondary mb-4">
+                          Set Dashboard Password
+                        </h3>
+                        <p className="font-mono text-[11px] text-text-secondary mb-4">
+                          No password is currently set. Set a password to protect your dashboard.
+                        </p>
+                        <div className="space-y-3 max-w-md">
+                          <div className="relative">
+                            <input
+                              type={showNewPassword ? 'text' : 'password'}
+                              value={setupPassword}
+                              onChange={e => setSetupPassword(e.target.value)}
+                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                              placeholder="Create a password (min 6 chars)"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowNewPassword(!showNewPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-accent-lime"
+                              tabIndex={-1}
+                            >
+                              {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                          <input
+                            type={showNewPassword ? 'text' : 'password'}
+                            value={setupConfirm}
+                            onChange={e => setSetupConfirm(e.target.value)}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                            placeholder="Confirm password"
+                          />
+                          <button
+                            onClick={handleSetupPassword}
+                            disabled={passwordLoading || !setupPassword || !setupConfirm}
+                            className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                          >
+                            {passwordLoading ? 'Setting...' : 'Set Password'}
+                          </button>
+                        </div>
                       </div>
+                    ) : (
+                      <div>
+                        <h3 className="font-mono text-label uppercase tracking-wider text-text-secondary mb-4">
+                          Change Dashboard Password
+                        </h3>
+                        <div className="space-y-3 max-w-md">
+                          <div className="relative">
+                            <input
+                              type={showCurrentPassword ? 'text' : 'password'}
+                              value={currentPassword}
+                              onChange={e => setCurrentPassword(e.target.value)}
+                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                              placeholder="Current password"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-accent-lime"
+                              tabIndex={-1}
+                            >
+                              {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                          <div className="relative">
+                            <input
+                              type={showNewPassword ? 'text' : 'password'}
+                              value={newPassword}
+                              onChange={e => setNewPassword(e.target.value)}
+                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                              placeholder="New password"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowNewPassword(!showNewPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-accent-lime"
+                              tabIndex={-1}
+                            >
+                              {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                          <input
+                            type={showNewPassword ? 'text' : 'password'}
+                            value={confirmNewPassword}
+                            onChange={e => setConfirmNewPassword(e.target.value)}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                            placeholder="Confirm new password"
+                          />
+                          <button
+                            onClick={handlePasswordChange}
+                            disabled={passwordLoading || !currentPassword || !newPassword || !confirmNewPassword}
+                            className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                          >
+                            {passwordLoading ? 'Updating...' : 'Update Password'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Password message */}
+                    {passwordMessage && (
+                      <div className={`flex items-center gap-2 px-4 py-3 rounded-lg ${
+                        passwordMessage.type === 'success'
+                          ? 'bg-status-success/10 border border-status-success/20'
+                          : 'bg-status-error/10 border border-status-error/20'
+                      }`}>
+                        {passwordMessage.type === 'success' ? (
+                          <CheckCircle2 size={16} className="text-status-success flex-shrink-0" />
+                        ) : (
+                          <AlertCircle size={16} className="text-status-error flex-shrink-0" />
+                        )}
+                        <p className={`font-mono text-[11px] ${
+                          passwordMessage.type === 'success' ? 'text-status-success' : 'text-status-error'
+                        }`}>
+                          {passwordMessage.text}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Session / Logout */}
+                    <div className="flex items-center justify-between py-4 border-t border-border-dark">
+                      <div>
+                        <h3 className="font-mono text-small font-bold mb-1">Session</h3>
+                        <p className="font-mono text-[11px] text-text-secondary">
+                          Sign out of the dashboard
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleLogout}
+                        className="flex items-center gap-2 px-4 py-2 border border-status-error/30 rounded-lg font-mono text-[11px] text-status-error hover:bg-status-error/10 transition-colors"
+                      >
+                        <LogOut size={14} />
+                        Sign Out
+                      </button>
                     </div>
 
                     {/* LAN only toggle */}
@@ -234,23 +446,78 @@ export default function SettingsPage() {
                       </button>
                     </div>
 
-                    {/* API Token */}
+                    {/* Cloudflare API Token */}
                     <div className="py-4 border-t border-border-dark">
-                      <h3 className="font-mono text-small font-bold mb-3">Cloudflare API Token</h3>
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small">
-                          {tokenVisible ? 'cf-abc123def456ghi789jkl012' : '••••••••••••••••••••••••••'}
+                      <h3 className="font-mono text-label uppercase tracking-wider text-text-secondary mb-4">
+                        Cloudflare API Token
+                      </h3>
+
+                      {cfApiKey ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary">
+                              {showApiKey ? cfApiKey : apiKeyStorage.getMasked()}
+                            </div>
+                            <button
+                              onClick={() => setShowApiKey(!showApiKey)}
+                              className="px-3 py-3 border border-border-dark rounded-lg font-mono text-[10px] text-text-secondary hover:text-text-primary transition-colors"
+                              title={showApiKey ? 'Hide token' : 'Show token'}
+                            >
+                              {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                            <button
+                              onClick={handleDeleteApiKey}
+                              className="px-3 py-3 border border-status-error/30 rounded-lg font-mono text-[10px] text-status-error hover:bg-status-error/10 transition-colors"
+                              title="Delete API token"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                          <p className="font-mono text-[11px] text-text-secondary">
+                            Token is stored locally in your browser. It is never sent to the backend for storage.
+                          </p>
                         </div>
-                        <button
-                          onClick={() => setTokenVisible(!tokenVisible)}
-                          className="px-3 py-3 border border-border-dark rounded-lg font-mono text-[10px] text-text-secondary hover:text-text-primary transition-colors"
-                        >
-                          {tokenVisible ? 'HIDE' : 'SHOW'}
-                        </button>
-                        <button className="px-3 py-3 border border-status-error/30 rounded-lg font-mono text-[10px] text-status-error hover:bg-status-error/10 transition-colors">
-                          REVOKE
-                        </button>
-                      </div>
+                      ) : (
+                        <div className="space-y-3 max-w-md">
+                          <p className="font-mono text-[11px] text-text-secondary mb-2">
+                            No Cloudflare API token configured. Add one to manage tunnels.
+                          </p>
+                          <input
+                            type="text"
+                            value={newApiKey}
+                            onChange={e => setNewApiKey(e.target.value)}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                            placeholder="Paste your Cloudflare API token..."
+                          />
+                          <button
+                            onClick={handleAddApiKey}
+                            disabled={apiKeyLoading || !newApiKey}
+                            className="flex items-center gap-2 px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                          >
+                            {apiKeyLoading ? 'Validating...' : <><Plus size={14} /> Add Token</>}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* API Key message */}
+                      {apiKeyMessage && (
+                        <div className={`mt-3 flex items-center gap-2 px-4 py-3 rounded-lg ${
+                          apiKeyMessage.type === 'success'
+                            ? 'bg-status-success/10 border border-status-success/20'
+                            : 'bg-status-error/10 border border-status-error/20'
+                        }`}>
+                          {apiKeyMessage.type === 'success' ? (
+                            <CheckCircle2 size={16} className="text-status-success flex-shrink-0" />
+                          ) : (
+                            <AlertCircle size={16} className="text-status-error flex-shrink-0" />
+                          )}
+                          <p className={`font-mono text-[11px] ${
+                            apiKeyMessage.type === 'success' ? 'text-status-success' : 'text-status-error'
+                          }`}>
+                            {apiKeyMessage.text}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
