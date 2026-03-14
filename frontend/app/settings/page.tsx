@@ -222,7 +222,7 @@ export default function SettingsPage() {
                   key={section.key}
                   onClick={() => setActiveSection(section.key)}
                   className={`
-                    w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left
+                    w-full flex items-center gap-3 px-4 py-3  transition-all text-left
                     ${activeSection === section.key
                       ? 'bg-bg-secondary text-accent-lime border border-border-dark'
                       : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary/50'
@@ -238,7 +238,7 @@ export default function SettingsPage() {
 
           {/* Right - Content */}
           <div className="lg:col-span-3">
-            <div className="bg-bg-secondary rounded-card border border-border-dark p-8">
+            <div className="bg-bg-secondary  border border-border-dark p-8">
               {activeSection === 'system' && (
                 <div>
                   <h2 className="font-serif text-h2 mb-6">System Information</h2>
@@ -299,7 +299,7 @@ export default function SettingsPage() {
                               type={showNewPassword ? 'text' : 'password'}
                               value={setupPassword}
                               onChange={e => setSetupPassword(e.target.value)}
-                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
                               placeholder="Create a password (min 6 chars)"
                             />
                             <button
@@ -315,13 +315,13 @@ export default function SettingsPage() {
                             type={showNewPassword ? 'text' : 'password'}
                             value={setupConfirm}
                             onChange={e => setSetupConfirm(e.target.value)}
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
                             placeholder="Confirm password"
                           />
                           <button
                             onClick={handleSetupPassword}
                             disabled={passwordLoading || !setupPassword || !setupConfirm}
-                            className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                            className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50"
                           >
                             {passwordLoading ? 'Setting...' : 'Set Password'}
                           </button>
@@ -338,7 +338,7 @@ export default function SettingsPage() {
                               type={showCurrentPassword ? 'text' : 'password'}
                               value={currentPassword}
                               onChange={e => setCurrentPassword(e.target.value)}
-                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
                               placeholder="Current password"
                             />
                             <button
@@ -355,7 +355,7 @@ export default function SettingsPage() {
                               type={showNewPassword ? 'text' : 'password'}
                               value={newPassword}
                               onChange={e => setNewPassword(e.target.value)}
-                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                              className="w-full px-4 py-3 pr-12 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
                               placeholder="New password"
                             />
                             <button
@@ -371,13 +371,13 @@ export default function SettingsPage() {
                             type={showNewPassword ? 'text' : 'password'}
                             value={confirmNewPassword}
                             onChange={e => setConfirmNewPassword(e.target.value)}
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
                             placeholder="Confirm new password"
                           />
                           <button
                             onClick={handlePasswordChange}
                             disabled={passwordLoading || !currentPassword || !newPassword || !confirmNewPassword}
-                            className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                            className="px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50"
                           >
                             {passwordLoading ? 'Updating...' : 'Update Password'}
                           </button>
@@ -387,7 +387,7 @@ export default function SettingsPage() {
 
                     {/* Password message */}
                     {passwordMessage && (
-                      <div className={`flex items-center gap-2 px-4 py-3 rounded-lg ${
+                      <div className={`flex items-center gap-2 px-4 py-3  ${
                         passwordMessage.type === 'success'
                           ? 'bg-status-success/10 border border-status-success/20'
                           : 'bg-status-error/10 border border-status-error/20'
@@ -415,7 +415,7 @@ export default function SettingsPage() {
                       </div>
                       <button
                         onClick={handleLogout}
-                        className="flex items-center gap-2 px-4 py-2 border border-status-error/30 rounded-lg font-mono text-[11px] text-status-error hover:bg-status-error/10 transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 border border-status-error/30  font-mono text-[11px] text-status-error hover:bg-status-error/10 transition-colors"
                       >
                         <LogOut size={14} />
                         Sign Out
@@ -433,13 +433,13 @@ export default function SettingsPage() {
                       <button
                         onClick={() => setLanOnly(!lanOnly)}
                         className={`
-                          w-10 h-5 rounded-full transition-colors relative
+                          w-10 h-5  transition-colors relative
                           ${lanOnly ? 'bg-accent-lime' : 'bg-border-dark'}
                         `}
                       >
                         <span
                           className={`
-                            absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform
+                            absolute top-0.5 w-4 h-4  bg-white transition-transform
                             ${lanOnly ? 'left-5' : 'left-0.5'}
                           `}
                         />
@@ -455,19 +455,19 @@ export default function SettingsPage() {
                       {cfApiKey ? (
                         <div className="space-y-3">
                           <div className="flex items-center gap-3">
-                            <div className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary">
+                            <div className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary">
                               {showApiKey ? cfApiKey : apiKeyStorage.getMasked()}
                             </div>
                             <button
                               onClick={() => setShowApiKey(!showApiKey)}
-                              className="px-3 py-3 border border-border-dark rounded-lg font-mono text-[10px] text-text-secondary hover:text-text-primary transition-colors"
+                              className="px-3 py-3 border border-border-dark  font-mono text-[10px] text-text-secondary hover:text-text-primary transition-colors"
                               title={showApiKey ? 'Hide token' : 'Show token'}
                             >
                               {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
                             </button>
                             <button
                               onClick={handleDeleteApiKey}
-                              className="px-3 py-3 border border-status-error/30 rounded-lg font-mono text-[10px] text-status-error hover:bg-status-error/10 transition-colors"
+                              className="px-3 py-3 border border-status-error/30  font-mono text-[10px] text-status-error hover:bg-status-error/10 transition-colors"
                               title="Delete API token"
                             >
                               <Trash2 size={14} />
@@ -486,13 +486,13 @@ export default function SettingsPage() {
                             type="text"
                             value={newApiKey}
                             onChange={e => setNewApiKey(e.target.value)}
-                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20"
                             placeholder="Paste your Cloudflare API token..."
                           />
                           <button
                             onClick={handleAddApiKey}
                             disabled={apiKeyLoading || !newApiKey}
-                            className="flex items-center gap-2 px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                            className="flex items-center gap-2 px-6 py-2.5 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50"
                           >
                             {apiKeyLoading ? 'Validating...' : <><Plus size={14} /> Add Token</>}
                           </button>
@@ -501,7 +501,7 @@ export default function SettingsPage() {
 
                       {/* API Key message */}
                       {apiKeyMessage && (
-                        <div className={`mt-3 flex items-center gap-2 px-4 py-3 rounded-lg ${
+                        <div className={`mt-3 flex items-center gap-2 px-4 py-3  ${
                           apiKeyMessage.type === 'success'
                             ? 'bg-status-success/10 border border-status-success/20'
                             : 'bg-status-error/10 border border-status-error/20'
@@ -535,7 +535,7 @@ export default function SettingsPage() {
                         key={t}
                         onClick={() => handleThemeChange(t)}
                         className={`
-                          px-6 py-3 rounded-lg font-mono text-small uppercase tracking-wider transition-all
+                          px-6 py-3  font-mono text-small uppercase tracking-wider transition-all
                           ${theme === t
                             ? 'bg-accent-lime text-text-dark font-bold'
                             : 'bg-bg-primary border border-border-dark text-text-secondary hover:text-text-primary'

@@ -195,14 +195,14 @@ export default function NginxPage() {
             <button
               onClick={testConfig}
               disabled={testing}
-              className="flex items-center gap-2 px-4 py-2 border border-border-dark rounded-lg font-mono text-small text-text-secondary hover:text-text-primary transition-colors"
+              className="flex items-center gap-2 px-4 py-2 border border-border-dark  font-mono text-small text-text-secondary hover:text-text-primary transition-colors"
             >
               <RefreshCw size={14} className={testing ? "animate-spin" : ""} />
               {testing ? 'Testing...' : 'Test Config'}
             </button>
             <button
               onClick={reloadNginx}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
             >
               Reload Nginx
             </button>
@@ -214,7 +214,7 @@ export default function NginxPage() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`mb-4 px-4 py-3 rounded-lg font-mono text-small flex items-center gap-2 ${
+            className={`mb-4 px-4 py-3  font-mono text-small flex items-center gap-2 ${
               message.type === 'success'
                 ? 'bg-accent-lime/10 text-accent-lime border border-accent-lime/30'
                 : 'bg-status-error/10 text-status-error border border-status-error/30'
@@ -231,7 +231,7 @@ export default function NginxPage() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`mb-4 px-4 py-3 rounded-lg font-mono text-small border ${
+            className={`mb-4 px-4 py-3  font-mono text-small border ${
               testResult.success
                 ? 'bg-accent-lime/10 border-accent-lime/30'
                 : 'bg-status-error/10 border-status-error/30'
@@ -253,10 +253,10 @@ export default function NginxPage() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-bg-secondary rounded-lg p-1">
+        <div className="flex gap-1 mb-6 bg-bg-secondary  p-1">
           <button
             onClick={() => setTab('files')}
-            className={`px-4 py-2 rounded-md font-mono text-small uppercase tracking-wider transition-all ${
+            className={`px-4 py-2 -md font-mono text-small uppercase tracking-wider transition-all ${
               tab === 'files'
                 ? 'bg-accent-lime text-text-dark font-bold'
                 : 'text-text-secondary hover:text-text-primary'
@@ -266,7 +266,7 @@ export default function NginxPage() {
           </button>
           <button
             onClick={() => setTab('generator')}
-            className={`px-4 py-2 rounded-md font-mono text-small uppercase tracking-wider transition-all ${
+            className={`px-4 py-2 -md font-mono text-small uppercase tracking-wider transition-all ${
               tab === 'generator'
                 ? 'bg-accent-lime text-text-dark font-bold'
                 : 'text-text-secondary hover:text-text-primary'
@@ -280,7 +280,7 @@ export default function NginxPage() {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* File List */}
             <div className="lg:col-span-1">
-              <div className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden">
+              <div className="bg-bg-secondary  border border-border-dark overflow-hidden">
                 <div className="px-4 py-3 border-b border-border-dark flex items-center justify-between">
                   <span className="font-mono text-label uppercase tracking-wider text-text-secondary">Sites Available</span>
                   <button
@@ -298,20 +298,20 @@ export default function NginxPage() {
                       value={newFileName}
                       onChange={e => setNewFileName(e.target.value)}
                       placeholder="site-name"
-                      className="w-full px-3 py-2 bg-bg-secondary border border-border-dark rounded font-mono text-small text-text-primary mb-2"
+                      className="w-full px-3 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary mb-2"
                       autoFocus
                       onKeyDown={e => e.key === 'Enter' && createFile()}
                     />
                     <div className="flex gap-2">
                       <button
                         onClick={createFile}
-                        className="flex-1 px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold rounded"
+                        className="flex-1 px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold "
                       >
                         Create
                       </button>
                       <button
                         onClick={() => { setShowNewFile(false); setNewFileName('') }}
-                        className="px-3 py-1.5 border border-border-dark text-text-secondary font-mono text-[11px] rounded"
+                        className="px-3 py-1.5 border border-border-dark text-text-secondary font-mono text-[11px] "
                       >
                         Cancel
                       </button>
@@ -370,7 +370,7 @@ export default function NginxPage() {
 
             {/* Editor */}
             <div className="lg:col-span-3">
-              <div className="bg-bg-secondary rounded-card border border-border-dark overflow-hidden">
+              <div className="bg-bg-secondary  border border-border-dark overflow-hidden">
                 <div className="px-4 py-3 border-b border-border-dark flex items-center justify-between">
                   <span className="font-mono text-label uppercase tracking-wider text-text-secondary">
                     {selectedFile ? selectedFile : 'Select a file to edit'}
@@ -381,7 +381,7 @@ export default function NginxPage() {
                       <button
                         onClick={saveFile}
                         disabled={saving || !hasUnsavedChanges}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold rounded disabled:opacity-50"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold  disabled:opacity-50"
                       >
                         <Save size={12} />
                         {saving ? 'Saving...' : 'Save'}
@@ -406,7 +406,7 @@ export default function NginxPage() {
         {tab === 'generator' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Config Form */}
-            <div className="bg-bg-secondary rounded-card border border-border-dark p-6">
+            <div className="bg-bg-secondary  border border-border-dark p-6">
               <h2 className="font-serif text-h3 mb-6">Generate Site Config</h2>
 
               <div className="space-y-5">
@@ -417,7 +417,7 @@ export default function NginxPage() {
                   <input
                     value={domain}
                     onChange={e => setDomain(e.target.value)}
-                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                   />
                 </div>
 
@@ -428,7 +428,7 @@ export default function NginxPage() {
                   <input
                     value={frontendPath}
                     onChange={e => setFrontendPath(e.target.value)}
-                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                   />
                 </div>
 
@@ -439,16 +439,16 @@ export default function NginxPage() {
                     </label>
                     <button
                       onClick={() => setProxyEnabled(!proxyEnabled)}
-                      className={`w-10 h-5 rounded-full transition-colors relative ${proxyEnabled ? 'bg-accent-lime' : 'bg-border-dark'}`}
+                      className={`w-10 h-5  transition-colors relative ${proxyEnabled ? 'bg-accent-lime' : 'bg-border-dark'}`}
                     >
-                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${proxyEnabled ? 'left-5' : 'left-0.5'}`} />
+                      <span className={`absolute top-0.5 w-4 h-4  bg-white transition-transform ${proxyEnabled ? 'left-5' : 'left-0.5'}`} />
                     </button>
                   </div>
                   {proxyEnabled && (
                     <input
                       value={proxyPort}
                       onChange={e => setProxyPort(e.target.value)}
-                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark rounded-lg font-mono text-small text-text-primary"
+                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
                       placeholder="8000"
                     />
                   )}
@@ -457,7 +457,7 @@ export default function NginxPage() {
                 <button
                   onClick={handleApplyGenerator}
                   disabled={generatorState === 'testing'}
-                  className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all disabled:opacity-50"
+                  className="w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50"
                 >
                   {generatorState === 'testing' ? 'Generating & Testing...' : 'Generate & Apply →'}
                 </button>
@@ -470,7 +470,7 @@ export default function NginxPage() {
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-bg-secondary rounded-card border-2 border-accent-lime p-6"
+                  className="bg-bg-secondary  border-2 border-accent-lime p-6"
                 >
                   <div className="flex items-center gap-2 mb-4">
                     <CheckCircle2 size={20} className="text-accent-lime" />
@@ -495,16 +495,16 @@ export default function NginxPage() {
                   </p>
                   <Link
                     href="/dashboard"
-                    className="block w-full mt-6 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-lg hover:bg-accent-lime-muted transition-all text-center"
+                    className="block w-full mt-6 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all text-center"
                   >
                     Go to Dashboard &rarr;
                   </Link>
                 </motion.div>
               ) : (
-                <div className="bg-bg-secondary rounded-card border border-border-dark p-6 flex flex-col items-center justify-center h-full text-center">
+                <div className="bg-bg-secondary  border border-border-dark p-6 flex flex-col items-center justify-center h-full text-center">
                   {generatorState === 'testing' ? (
                     <>
-                      <div className="w-8 h-8 border-2 border-accent-lime border-t-transparent rounded-full animate-spin mb-4" />
+                      <div className="w-8 h-8 border-2 border-accent-lime border-t-transparent  animate-spin mb-4" />
                       <p className="font-mono text-small text-text-secondary">Generating and testing...</p>
                     </>
                   ) : (

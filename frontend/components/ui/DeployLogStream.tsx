@@ -252,27 +252,27 @@ export default function DeployLogStream({
   const getStatusBadge = () => {
     switch (status) {
       case 'connecting':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-yellow-900/30 text-yellow-400 border border-yellow-800/50">
-          <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5  text-xs bg-yellow-900/30 text-yellow-400 border border-yellow-800/50">
+          <span className="w-1.5 h-1.5  bg-yellow-400 animate-pulse" />
           Connecting
         </span>
       case 'streaming':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-blue-900/30 text-blue-400 border border-blue-800/50">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5  text-xs bg-blue-900/30 text-blue-400 border border-blue-800/50">
+          <span className="w-1.5 h-1.5  bg-blue-400 animate-pulse" />
           Live
         </span>
       case 'success':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-emerald-900/30 text-emerald-400 border border-emerald-800/50">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5  text-xs bg-emerald-900/30 text-emerald-400 border border-emerald-800/50">
+          <span className="w-1.5 h-1.5  bg-emerald-400" />
           Success
         </span>
       case 'failed':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-900/30 text-red-400 border border-red-800/50">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5  text-xs bg-red-900/30 text-red-400 border border-red-800/50">
+          <span className="w-1.5 h-1.5  bg-red-400" />
           Failed
         </span>
       default:
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-zinc-800 text-zinc-400 border border-zinc-700">
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5  text-xs bg-zinc-800 text-zinc-400 border border-zinc-700">
           {status}
         </span>
     }
@@ -294,11 +294,11 @@ export default function DeployLogStream({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter logs..."
-            className="px-2 py-1 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-300 placeholder-zinc-600 w-40 focus:outline-none focus:border-zinc-500"
+            className="px-2 py-1 text-xs bg-zinc-900 border border-zinc-700  text-zinc-300 placeholder-zinc-600 w-40 focus:outline-none focus:border-zinc-500"
           />
           <button
             onClick={() => setAutoScroll(!autoScroll)}
-            className={`px-2 py-1 text-xs rounded border ${
+            className={`px-2 py-1 text-xs  border ${
               autoScroll
                 ? 'bg-blue-900/30 text-blue-400 border-blue-800/50'
                 : 'bg-zinc-800 text-zinc-400 border-zinc-700'
@@ -314,7 +314,7 @@ export default function DeployLogStream({
       <div
         ref={logContainerRef}
         onScroll={handleScroll}
-        className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 overflow-y-auto font-mono text-xs leading-5 select-text"
+        className="bg-zinc-950 border border-zinc-800  p-3 overflow-y-auto font-mono text-xs leading-5 select-text"
         style={{ maxHeight }}
       >
         {filteredLogs.length === 0 && status === 'connecting' && (

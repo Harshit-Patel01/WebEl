@@ -22,7 +22,7 @@ export default function HelpPage() {
             <BookOpen className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Getting Started</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6">
             <p className="font-sans text-body text-text-secondary mb-4">
               OpenDeploy is a self-hosted deployment platform that turns your Linux device into a powerful web hosting solution.
               This guide will help you understand how to use OpenDeploy effectively and securely.
@@ -54,7 +54,7 @@ export default function HelpPage() {
             <Shield className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Security Best Practices</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6 space-y-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6 space-y-6">
             <div>
               <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
                 1. Change Default Password
@@ -99,7 +99,7 @@ export default function HelpPage() {
             <Server className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Step-by-Step Deployment Walkthrough</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6">
             <div className="space-y-6">
               <div>
                 <h4 className="font-mono text-small font-bold text-accent-lime mb-2">Step 1: Prepare Your Repository</h4>
@@ -152,7 +152,7 @@ export default function HelpPage() {
             <Lock className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Environment Variables Best Practices</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6 space-y-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6 space-y-6">
             <div>
               <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
                 What Are Environment Variables?
@@ -196,7 +196,7 @@ export default function HelpPage() {
               <p className="font-sans text-body text-text-secondary mb-2">
                 Use UPPERCASE_WITH_UNDERSCORES for environment variable names. This makes them easily identifiable in your code and follows industry standards.
               </p>
-              <div className="mt-3 bg-bg-primary rounded-lg p-4 font-mono text-[11px] text-text-primary border border-border-dark">
+              <div className="mt-3 bg-bg-primary  p-4 font-mono text-[11px] text-text-primary border border-border-dark">
                 <div className="text-accent-lime">✓ Good:</div>
                 <div className="ml-4 mt-1">DATABASE_URL</div>
                 <div className="ml-4">API_KEY</div>
@@ -249,7 +249,7 @@ export default function HelpPage() {
             <BookOpen className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">GitHub Repository Setup Guide</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6 space-y-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6 space-y-6">
             <div>
               <h3 className="font-mono text-small font-bold text-accent-lime mb-3 uppercase tracking-wider">
                 Repository Requirements
@@ -266,7 +266,7 @@ export default function HelpPage() {
               <p className="font-sans text-body text-text-secondary mb-2">
                 Ensure your package.json includes a build script and all dependencies:
               </p>
-              <div className="mt-3 bg-bg-primary rounded-lg p-4 font-mono text-[11px] text-text-primary border border-border-dark">
+              <div className="mt-3 bg-bg-primary  p-4 font-mono text-[11px] text-text-primary border border-border-dark">
                 <pre>{`{
   "name": "my-app",
   "scripts": {
@@ -288,7 +288,7 @@ export default function HelpPage() {
               <p className="font-sans text-body text-text-secondary mb-2">
                 Include a requirements.txt file with all dependencies:
               </p>
-              <div className="mt-3 bg-bg-primary rounded-lg p-4 font-mono text-[11px] text-text-primary border border-border-dark">
+              <div className="mt-3 bg-bg-primary  p-4 font-mono text-[11px] text-text-primary border border-border-dark">
                 <pre>{`flask==3.0.0
 gunicorn==21.2.0
 python-dotenv==1.0.0`}</pre>
@@ -321,7 +321,7 @@ python-dotenv==1.0.0`}</pre>
             <Network className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Cloudflare Tunnel (Recommended)</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6">
             <p className="font-sans text-body text-text-secondary mb-4">
               Cloudflare Tunnel provides secure access to your applications without exposing ports or your IP address.
             </p>
@@ -359,7 +359,7 @@ python-dotenv==1.0.0`}</pre>
             <AlertTriangle className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Troubleshooting Common Issues</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6 space-y-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6 space-y-6">
             <div>
               <h4 className="font-mono text-small font-bold text-text-primary mb-2">Build Fails</h4>
               <p className="font-sans text-small text-text-secondary mb-2">
@@ -433,7 +433,7 @@ python-dotenv==1.0.0`}</pre>
             <ExternalLink className="text-accent-lime" size={24} />
             <h2 className="font-serif text-h2">Additional Resources</h2>
           </div>
-          <div className="bg-bg-secondary rounded-card border border-border-dark p-6">
+          <div className="bg-bg-secondary  border border-border-dark p-6">
             <div className="space-y-3 font-mono text-small">
               <a href="https://nginx.org/en/docs/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-accent-lime hover:text-accent-lime-muted transition-colors">
                 <ExternalLink size={14} /> Nginx Documentation

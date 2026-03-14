@@ -113,7 +113,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
                   key={item.label}
                   href={item.path}
                   className={`
-                    flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
+                    flex items-center gap-3 px-3 py-2.5  transition-colors
                     min-h-[44px] lg:min-h-[40px]
                     ${isActive
                       ? 'bg-bg-primary text-accent-lime'
@@ -129,7 +129,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
                     <span className="font-mono text-small flex-1 whitespace-nowrap overflow-hidden">{item.label}</span>
                   )}
                   {expanded && item.complete && (
-                    <span className="w-2 h-2 rounded-full bg-accent-lime flex-shrink-0" />
+                    <span className="w-2 h-2  bg-accent-lime flex-shrink-0" />
                   )}
                 </Link>
               )
@@ -147,7 +147,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }: SidebarProps) {
                 key={item.label}
                 href={item.path}
                 className={`
-                  flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
+                  flex items-center gap-3 px-3 py-2.5  transition-colors
                   min-h-[44px] lg:min-h-[40px]
                   ${isActive
                     ? 'bg-bg-primary text-accent-lime'

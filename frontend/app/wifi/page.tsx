@@ -221,7 +221,7 @@ export default function WifiPage() {
 
       <div className="mb-10">
         <div className="flex items-center gap-3 mb-3">
-          <div className="p-2 bg-accent-lime/10 rounded-xl">
+          <div className="p-2 bg-accent-lime/10 ">
             <Radio className="w-6 h-6 text-accent-lime" />
           </div>
           <h1 className="font-serif text-h1 text-text-dark">WiFi Configuration</h1>
@@ -240,7 +240,7 @@ export default function WifiPage() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-bg-surface rounded-2xl border border-border-light overflow-hidden"
+            className="bg-bg-surface  border border-border-light overflow-hidden"
           >
             <div className="bg-accent-lime/5 px-6 py-4 border-b border-border-light">
               <div className="flex items-center justify-between">
@@ -258,8 +258,8 @@ export default function WifiPage() {
             <div className="p-6">
               {status?.connected && status.ssid ? (
                 <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-4 bg-accent-lime/10 rounded-xl border border-accent-lime/20">
-                    <div className="p-2 bg-accent-lime rounded-lg">
+                  <div className="flex items-center gap-3 p-4 bg-accent-lime/10  border border-accent-lime/20">
+                    <div className="p-2 bg-accent-lime ">
                       <Wifi className="w-5 h-5 text-text-dark" />
                     </div>
                     <div className="flex-1">
@@ -270,7 +270,7 @@ export default function WifiPage() {
 
                   <Link
                     href="/internet"
-                    className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-xl hover:bg-accent-lime-muted transition-all group"
+                    className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all group"
                   >
                     Verify Internet
                     <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -278,7 +278,7 @@ export default function WifiPage() {
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 mx-auto mb-4 bg-bg-secondary rounded-full flex items-center justify-center">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-bg-secondary  flex items-center justify-center">
                     <WifiOff className="w-8 h-8 text-text-secondary" />
                   </div>
                   <p className="font-mono text-small text-text-secondary mb-2">Not Connected</p>
@@ -293,7 +293,7 @@ export default function WifiPage() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-bg-surface rounded-2xl border border-border-light p-6"
+            className="bg-bg-surface  border border-border-light p-6"
           >
             <h3 className="font-mono text-small font-bold uppercase tracking-wider text-text-dark mb-4">
               Quick Tips
@@ -321,7 +321,7 @@ export default function WifiPage() {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.15 }}
-            className="bg-bg-surface rounded-2xl border border-border-light overflow-hidden"
+            className="bg-bg-surface  border border-border-light overflow-hidden"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border-light bg-bg-secondary/30">
@@ -329,7 +329,7 @@ export default function WifiPage() {
                 <div className="relative">
                   <Wifi className="w-5 h-5 text-accent-lime" />
                   {scanning && (
-                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-accent-lime rounded-full animate-pulse" />
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-accent-lime  animate-pulse" />
                   )}
                 </div>
                 <span className="font-mono text-small font-bold uppercase tracking-wider text-text-dark">
@@ -339,7 +339,7 @@ export default function WifiPage() {
               <button
                 onClick={loadNetworks}
                 disabled={scanning}
-                className="flex items-center gap-2 px-4 py-2 font-mono text-label uppercase tracking-wider text-accent-lime-muted hover:text-accent-lime hover:bg-accent-lime/10 rounded-lg transition-all disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 font-mono text-label uppercase tracking-wider text-accent-lime-muted hover:text-accent-lime hover:bg-accent-lime/10  transition-all disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
                 {scanning ? 'Scanning...' : 'Refresh'}
@@ -355,7 +355,7 @@ export default function WifiPage() {
                 </div>
               ) : networks.length === 0 ? (
                 <div className="p-16 text-center">
-                  <div className="w-20 h-20 mx-auto mb-4 bg-bg-secondary rounded-full flex items-center justify-center">
+                  <div className="w-20 h-20 mx-auto mb-4 bg-bg-secondary  flex items-center justify-center">
                     <WifiOff className="w-10 h-10 text-text-secondary opacity-50" />
                   </div>
                   <p className="font-mono text-small text-text-dark mb-2">No networks found</p>
@@ -387,7 +387,7 @@ export default function WifiPage() {
                             {[1, 2, 3, 4].map((bar) => (
                               <div
                                 key={bar}
-                                className={`w-1.5 rounded-sm transition-all ${
+                                className={`w-1.5 -sm transition-all ${
                                   bar <= getSignalBars(network.signal)
                                     ? 'bg-accent-lime'
                                     : 'bg-border-light'
@@ -404,12 +404,12 @@ export default function WifiPage() {
                                 {network.ssid}
                               </span>
                               {network.connected && (
-                                <span className="px-2 py-0.5 bg-accent-lime text-text-dark text-xs font-mono font-bold rounded-full">
+                                <span className="px-2 py-0.5 bg-accent-lime text-text-dark text-xs font-mono font-bold ">
                                   ACTIVE
                                 </span>
                               )}
                               {network.saved && (
-                                <span className="px-2 py-0.5 bg-accent-lime/10 text-accent-lime-muted text-xs font-mono font-bold rounded-full border border-accent-lime/20">
+                                <span className="px-2 py-0.5 bg-accent-lime/10 text-accent-lime-muted text-xs font-mono font-bold  border border-accent-lime/20">
                                   SAVED
                                 </span>
                               )}
@@ -438,7 +438,7 @@ export default function WifiPage() {
                                 e.stopPropagation()
                                 handleDeleteNetwork(network.ssid)
                               }}
-                              className="p-2 text-text-secondary hover:text-status-error hover:bg-status-error/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                              className="p-2 text-text-secondary hover:text-status-error hover:bg-status-error/10  transition-all opacity-0 group-hover:opacity-100"
                               title="Delete saved network"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -468,7 +468,7 @@ export default function WifiPage() {
                   <div className="p-6">
                     {/* Panel Header */}
                     <div className="flex items-center gap-3 mb-5">
-                      <div className="p-2 bg-accent-lime rounded-lg">
+                      <div className="p-2 bg-accent-lime ">
                         <Shield className="w-5 h-5 text-text-dark" />
                       </div>
                       <div>
@@ -483,19 +483,19 @@ export default function WifiPage() {
 
                     {/* Network Details */}
                     <div className="grid grid-cols-3 gap-3 mb-5">
-                      <div className="p-3 bg-bg-surface rounded-xl border border-border-light">
+                      <div className="p-3 bg-bg-surface  border border-border-light">
                         <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Security</p>
                         <p className="font-mono text-small font-bold text-text-dark">
                           {getSecurityLabel(selectedNetwork.security)}
                         </p>
                       </div>
-                      <div className="p-3 bg-bg-surface rounded-xl border border-border-light">
+                      <div className="p-3 bg-bg-surface  border border-border-light">
                         <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Signal</p>
                         <p className="font-mono text-small font-bold text-text-dark">
                           {selectedNetwork.signal}%
                         </p>
                       </div>
-                      <div className="p-3 bg-bg-surface rounded-xl border border-border-light">
+                      <div className="p-3 bg-bg-surface  border border-border-light">
                         <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Quality</p>
                         <p className="font-mono text-small font-bold text-text-dark">
                           {getSignalStrengthLabel(selectedNetwork.signal)}
@@ -517,7 +517,7 @@ export default function WifiPage() {
                             onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
                             placeholder="Enter WiFi password"
                             disabled={connecting}
-                            className="w-full px-4 py-3 pr-12 bg-bg-surface border border-border-light rounded-xl font-mono text-small text-text-dark placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all disabled:opacity-50"
+                            className="w-full px-4 py-3 pr-12 bg-bg-surface border border-border-light  font-mono text-small text-text-dark placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all disabled:opacity-50"
                           />
                           <button
                             type="button"
@@ -535,7 +535,7 @@ export default function WifiPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mb-5 p-4 bg-accent-lime/10 border border-accent-lime/20 rounded-xl">
+                      <div className="mb-5 p-4 bg-accent-lime/10 border border-accent-lime/20 ">
                         <div className="flex items-center gap-2">
                           <WifiOff className="w-4 h-4 text-accent-lime-muted" />
                           <p className="text-small font-mono text-text-dark">
@@ -552,7 +552,7 @@ export default function WifiPage() {
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
-                          className="mb-4 p-4 bg-bg-secondary border border-border-light rounded-xl"
+                          className="mb-4 p-4 bg-bg-secondary border border-border-light "
                         >
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-mono uppercase tracking-wider text-text-secondary">Connection Log</p>
@@ -584,7 +584,7 @@ export default function WifiPage() {
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
-                          className="mb-4 p-4 bg-status-error/10 border border-status-error/20 rounded-xl flex items-start gap-3"
+                          className="mb-4 p-4 bg-status-error/10 border border-status-error/20  flex items-start gap-3"
                         >
                           <AlertCircle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
                           <div className="flex-1">
@@ -605,7 +605,7 @@ export default function WifiPage() {
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
-                          className="mb-4 p-4 bg-status-success/10 border border-status-success/20 rounded-xl flex items-start gap-3"
+                          className="mb-4 p-4 bg-status-success/10 border border-status-success/20  flex items-start gap-3"
                         >
                           <CheckCircle2 className="w-5 h-5 text-status-success flex-shrink-0 mt-0.5" />
                           <p className="text-small text-status-success font-mono">Successfully connected to {selectedNetwork.ssid}!</p>
@@ -618,7 +618,7 @@ export default function WifiPage() {
                       <button
                         onClick={handleConnect}
                         disabled={connecting}
-                        className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-xl hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                       >
                         {connecting ? (
                           <>
@@ -640,7 +640,7 @@ export default function WifiPage() {
                           setError(null)
                         }}
                         disabled={connecting}
-                        className="px-6 py-3 bg-bg-surface text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-xl hover:bg-border-light transition-all disabled:opacity-50 border border-border-light"
+                        className="px-6 py-3 bg-bg-surface text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-border-light transition-all disabled:opacity-50 border border-border-light"
                       >
                         Cancel
                       </button>
@@ -657,7 +657,7 @@ export default function WifiPage() {
       <div className="mt-10">
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-accent-lime/10 rounded-xl">
+            <div className="p-2 bg-accent-lime/10 ">
               <Router className="w-6 h-6 text-accent-lime" />
             </div>
             <h2 className="font-serif text-h2 text-text-dark">Access Point</h2>
@@ -676,7 +676,7 @@ export default function WifiPage() {
             transition={{ delay: 0.3 }}
             className="xl:col-span-1"
           >
-            <div className="bg-bg-surface rounded-2xl border border-border-light overflow-hidden">
+            <div className="bg-bg-surface  border border-border-light overflow-hidden">
               <div className="bg-accent-lime/5 px-6 py-4 border-b border-border-light">
                 <div className="flex items-center justify-between">
                   <h3 className="font-mono text-small font-bold uppercase tracking-wider text-text-dark">
@@ -684,12 +684,12 @@ export default function WifiPage() {
                   </h3>
                   {apStatus?.running ? (
                     <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-status-success animate-pulse" />
+                      <span className="w-2 h-2  bg-status-success animate-pulse" />
                       <span className="font-mono text-[10px] text-status-success uppercase">Active</span>
                     </span>
                   ) : (
                     <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-text-secondary" />
+                      <span className="w-2 h-2  bg-text-secondary" />
                       <span className="font-mono text-[10px] text-text-secondary uppercase">Inactive</span>
                     </span>
                   )}
@@ -697,26 +697,26 @@ export default function WifiPage() {
               </div>
               <div className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 bg-bg-secondary rounded-xl">
+                  <div className="p-3 bg-bg-secondary ">
                     <p className="text-[10px] text-text-secondary uppercase tracking-wider mb-1">SSID</p>
                     <p className="font-mono text-small font-bold truncate">
                       {apStatus?.ssid || '—'}
                     </p>
                   </div>
-                  <div className="p-3 bg-bg-secondary rounded-xl">
+                  <div className="p-3 bg-bg-secondary ">
                     <p className="text-[10px] text-text-secondary uppercase tracking-wider mb-1">Clients</p>
                     <p className="font-mono text-small font-bold flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5 text-accent-lime" />
                       {apStatus?.connected_clients ?? 0}
                     </p>
                   </div>
-                  <div className="p-3 bg-bg-secondary rounded-xl">
+                  <div className="p-3 bg-bg-secondary ">
                     <p className="text-[10px] text-text-secondary uppercase tracking-wider mb-1">IP</p>
                     <p className="font-mono text-small font-bold">
                       {apStatus?.ip_address || '—'}
                     </p>
                   </div>
-                  <div className="p-3 bg-bg-secondary rounded-xl">
+                  <div className="p-3 bg-bg-secondary ">
                     <p className="text-[10px] text-text-secondary uppercase tracking-wider mb-1">Interface</p>
                     <p className="font-mono text-small font-bold">
                       {apStatus?.interface || '—'}
@@ -752,13 +752,13 @@ export default function WifiPage() {
                     }}
                     disabled={apToggling}
                     className={`
-                      w-10 h-5 rounded-full transition-colors relative disabled:opacity-50
+                      w-10 h-5  transition-colors relative disabled:opacity-50
                       ${apStatus?.enabled ? 'bg-accent-lime' : 'bg-border-light'}
                     `}
                   >
                     <span
                       className={`
-                        absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform
+                        absolute top-0.5 w-4 h-4  bg-white transition-transform
                         ${apStatus?.enabled ? 'left-5' : 'left-0.5'}
                       `}
                     />
@@ -775,7 +775,7 @@ export default function WifiPage() {
             transition={{ delay: 0.35 }}
             className="xl:col-span-2"
           >
-            <div className="bg-bg-surface rounded-2xl border border-border-light overflow-hidden">
+            <div className="bg-bg-surface  border border-border-light overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-border-light bg-bg-secondary/30">
                 <div className="flex items-center gap-3">
                   <Settings2 className="w-5 h-5 text-accent-lime" />
@@ -796,7 +796,7 @@ export default function WifiPage() {
                     value={apSsid}
                     onChange={e => setApSsid(e.target.value)}
                     placeholder="Access Point SSID"
-                    className="w-full px-4 py-3 bg-bg-surface border border-border-light rounded-xl font-mono text-small text-text-dark placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all"
+                    className="w-full px-4 py-3 bg-bg-surface border border-border-light  font-mono text-small text-text-dark placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all"
                   />
                 </div>
 
@@ -811,7 +811,7 @@ export default function WifiPage() {
                       value={apPassword}
                       onChange={e => setApPassword(e.target.value)}
                       placeholder="WiFi password"
-                      className="w-full px-4 py-3 pr-12 bg-bg-surface border border-border-light rounded-xl font-mono text-small text-text-dark placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all"
+                      className="w-full px-4 py-3 pr-12 bg-bg-surface border border-border-light  font-mono text-small text-text-dark placeholder:text-text-secondary focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all"
                     />
                     <button
                       type="button"
@@ -832,7 +832,7 @@ export default function WifiPage() {
                   <select
                     value={apChannel}
                     onChange={e => setApChannel(Number(e.target.value))}
-                    className="w-full px-4 py-3 bg-bg-surface border border-border-light rounded-xl font-mono text-small text-text-dark focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all appearance-none cursor-pointer"
+                    className="w-full px-4 py-3 bg-bg-surface border border-border-light  font-mono text-small text-text-dark focus:outline-none focus:border-accent-lime focus:ring-2 focus:ring-accent-lime/20 transition-all appearance-none cursor-pointer"
                   >
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(ch => (
                       <option key={ch} value={ch}>
@@ -849,7 +849,7 @@ export default function WifiPage() {
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className={`flex items-center gap-2 px-4 py-3 rounded-xl ${
+                      className={`flex items-center gap-2 px-4 py-3  ${
                         apMessage.type === 'success'
                           ? 'bg-status-success/10 border border-status-success/20'
                           : 'bg-status-error/10 border border-status-error/20'
@@ -897,7 +897,7 @@ export default function WifiPage() {
                       }
                     }}
                     disabled={apLoading}
-                    className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider rounded-xl hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {apLoading ? (
                       <>

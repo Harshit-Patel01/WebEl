@@ -17,7 +17,7 @@ export default function ServiceCard({ name, status, statusLabel, detail, variant
   return (
     <div
       className={`
-        rounded-card p-6 transition-all duration-200 cursor-pointer
+         p-6 transition-all duration-200 cursor-pointer
         hover:-translate-y-1 hover:shadow-xl
         ${isDark
           ? 'bg-bg-secondary border border-border-dark text-text-primary'

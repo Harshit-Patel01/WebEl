@@ -18,8 +18,8 @@ export default function StatusPill({ status, label, size = 'md' }: StatusPillPro
 
   return (
     <span className="inline-flex items-center gap-2 font-mono">
-      <span className={`relative w-2 h-2 rounded-full ${dotColor} ${status === 'healthy' ? 'pulse-dot' : ''}`}>
-        <span className={`block w-2 h-2 rounded-full ${dotColor}`} />
+      <span className={`relative w-2 h-2  ${dotColor} ${status === 'healthy' ? 'pulse-dot' : ''}`}>
+        <span className={`block w-2 h-2  ${dotColor}`} />
       </span>
       <span className={`${textSize} uppercase tracking-wider font-bold`}>
         {label}

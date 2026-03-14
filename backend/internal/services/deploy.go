@@ -235,12 +235,31 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 
 	// Step 1: npm install
 	d.logger.Info("running npm install", zap.String("dir", dir))
+
+	// Log to database immediately so user sees progress
+	installLog := &state.DeployLog{
+		DeployID:     jobID,
+		Stream:       "stdout",
+		Message:      "Installing dependencies with npm install...",
+		LogTimestamp: time.Now(),
+	}
+	d.db.CreateDeployLog(installLog)
+	if d.broadcaster != nil {
+		d.broadcaster.BroadcastToJob(jobID, map[string]interface{}{
+			"type":      "deploy_log",
+			"deployId":  jobID,
+			"stream":    "stdout",
+			"message":   "Installing dependencies with npm install...",
+			"timestamp": installLog.LogTimestamp,
+		})
+	}
+
 	installResult, err := d.runner.Run(ctx, exec.RunOpts{
 		JobID:          jobID + "-install",
 		BroadcastJobID: jobID,
 		JobType:        "npm_install",
 		Command:        d.cfg.NpmBinary,
-		Args:           []string{"install"},
+		Args:           []string{"install", "--prefer-offline", "--no-audit", "--progress=true"},
 		WorkDir:        dir,
 		Env:            envVars,
 		MergeEnv:       true,
@@ -287,6 +306,25 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 	}
 
 	d.logger.Info("running npm build", zap.String("dir", dir), zap.String("cmd", buildCmd))
+
+	// Log to database immediately
+	buildLog := &state.DeployLog{
+		DeployID:     jobID,
+		Stream:       "stdout",
+		Message:      fmt.Sprintf("Running build command: npm run %s", buildCmd),
+		LogTimestamp: time.Now(),
+	}
+	d.db.CreateDeployLog(buildLog)
+	if d.broadcaster != nil {
+		d.broadcaster.BroadcastToJob(jobID, map[string]interface{}{
+			"type":      "deploy_log",
+			"deployId":  jobID,
+			"stream":    "stdout",
+			"message":   buildLog.Message,
+			"timestamp": buildLog.LogTimestamp,
+		})
+	}
+
 	buildResult, err := d.runner.Run(ctx, exec.RunOpts{
 		JobID:          jobID + "-build",
 		BroadcastJobID: jobID,
