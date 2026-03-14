@@ -71,3 +71,10 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
     }
     return hijacker.Hijack()
 }
+
+// Flush implements http.Flusher for SSE support
+func (w *statusWriter) Flush() {
+    if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+        flusher.Flush()
+    }
+}
