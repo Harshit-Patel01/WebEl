@@ -132,3 +132,13 @@ type DeployLog struct {
 	Stream       string    `json:"stream"`
 	Message      string    `json:"message"`
 }
+
+type APConfig struct {
+	ID        int       `json:"id"`
+	SSID      string    `json:"ssid"`
+	Password  string    `json:"password"`
+	Enabled   bool      `json:"enabled"`
+	Channel   int       `json:"channel"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
