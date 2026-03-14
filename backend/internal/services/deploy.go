@@ -43,7 +43,6 @@ type DeployService struct {
 	nginx       *NginxService
 	container   *ContainerService
 	broadcaster exec.Broadcaster
-	wifiMonitor *WifiMonitor
 }
 
 // DeployOptions contains optional runtime configuration for a deployment
@@ -78,11 +77,6 @@ func (d *DeployService) SetContainerService(container *ContainerService) {
 // SetBroadcaster sets the WebSocket broadcaster for deploy phase updates.
 func (d *DeployService) SetBroadcaster(b exec.Broadcaster) {
 	d.broadcaster = b
-}
-
-// SetWifiMonitor sets the WiFi monitor so deployments can pause AP interference.
-func (d *DeployService) SetWifiMonitor(m *WifiMonitor) {
-	d.wifiMonitor = m
 }
 
 func (d *DeployService) broadcastPhase(deployID, phase, message string) {
@@ -492,11 +486,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		// Create a new context for the deployment (not tied to the HTTP request)
 		deployCtx := context.Background()
 
-		// Pause WiFi monitor during deployment to prevent AP from
-		// interfering with the network connection while cloning/building.
-		if d.wifiMonitor != nil {
-			d.wifiMonitor.SetManualConnectMode(d.cfg.BuildTimeout)
-		}
+		// AP now runs on a separate virtual interface (ap0) so it does not
+		// interfere with wlan0 connectivity during builds.
 
 		// Clone or pull
 		d.broadcastPhase(deployID, "clone", "Cloning repository...")
@@ -565,6 +556,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		projectType := ProjectType(project.ProjectType)
 		if projectType == "" {
 			projectType = d.DetectProjectType(project.ID)
+		}
+
+		// Override projectType based on framework for pure static sites
+		if framework == FrameworkStatic {
+			projectType = ProjectStatic
 		}
 
 		d.broadcastPhase(deployID, "build", "Building project...")
@@ -689,7 +685,16 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				logToDB("stderr", fmt.Sprintf("Failed to copy build output: %s", err.Error()))
 				// Not a fatal error — the build still succeeded
 			} else {
-				logToDB("stdout", fmt.Sprintf("Frontend files deployed to: %s", outputPath))
+				logToDB("stdout", "")
+				logToDB("stdout", "═══════════════════════════════════════════════════════════")
+				logToDB("stdout", fmt.Sprintf("✓ Frontend files deployed to: %s", outputPath))
+				logToDB("stdout", "")
+				logToDB("stdout", "To serve this site with nginx, configure your server block:")
+				logToDB("stdout", fmt.Sprintf("  root %s;", outputPath))
+				logToDB("stdout", "  index index.html;")
+				logToDB("stdout", "")
+				logToDB("stdout", "Or use the nginx configuration page to set up a domain.")
+				logToDB("stdout", "═══════════════════════════════════════════════════════════")
 				logToDB("stdout", "")
 				d.logDirectoryListing(outputPath, deployID, logToDB)
 			}

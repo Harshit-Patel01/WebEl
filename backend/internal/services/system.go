@@ -211,7 +211,7 @@ func (s *SystemService) GetServiceStatus(name string) (*ServiceStatus, error) {
 }
 
 func (s *SystemService) GetAllServiceStatuses() ([]ServiceStatus, error) {
-	services := []string{"nginx", "cloudflared"}
+	services := []string{"nginx", "opendeploy-cloudflared"}
 
 	// Also check for opendeploy app services
 	entries, _ := os.ReadDir("/etc/systemd/system")
