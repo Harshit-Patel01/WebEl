@@ -291,19 +291,19 @@ export default function DeploymentsPage() {
               {projects.length} project{projects.length !== 1 ? 's' : ''} deployed
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleCleanup}
-              className="px-3 py-2 bg-bg-secondary text-text-secondary font-mono text-[11px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 bg-bg-secondary text-text-secondary font-mono text-[10px] sm:text-[11px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
               title="Cleanup orphan containers and fix stale deploys"
             >
-              <Activity size={12} className="inline mr-1" /> Cleanup
+              <Activity size={12} className="flex-shrink-0" /> <span className="hidden xs:inline">Cleanup</span>
             </button>
             <Link
               href="/deploy"
-              className="px-4 py-2 bg-accent-lime text-text-dark font-mono text-[11px] font-bold rounded hover:bg-accent-lime-muted transition-colors"
+              className="px-2 sm:px-4 py-1.5 sm:py-2 bg-accent-lime text-text-dark font-mono text-[10px] sm:text-[11px] font-bold rounded hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
             >
-              <Plus size={12} className="inline mr-1" /> New Deploy
+              <Plus size={12} className="flex-shrink-0" /> <span>New Deploy</span>
             </Link>
           </div>
         </div>
@@ -424,30 +424,30 @@ export default function DeploymentsPage() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap">
                         <button
                           onClick={() => { setSelectedProjectId(project.id); setShowEnvModal(true); loadEnvVars(project.id) }}
-                          className="px-3 py-1.5 bg-bg-primary text-text-secondary font-mono text-[10px] font-bold rounded hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold rounded hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
                         >
-                          <Key size={12} /> Env
+                          <Key size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Env</span>
                         </button>
                         <button
                           onClick={() => handleRebuild(project.id)}
-                          className="px-3 py-1.5 bg-bg-primary text-text-secondary font-mono text-[10px] font-bold rounded hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold rounded hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
                         >
-                          <RefreshCw size={12} /> Rebuild
+                          <RefreshCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Rebuild</span>
                         </button>
                         <button
                           onClick={() => handleRedeploy(project.id)}
-                          className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[10px] font-bold rounded hover:bg-accent-lime-muted transition-colors"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold rounded hover:bg-accent-lime-muted transition-colors"
                         >
                           Deploy
                         </button>
                         <button
                           onClick={() => handleDeleteProject(project.id)}
-                          className="p-1.5 text-text-secondary hover:text-status-error transition-colors"
+                          className="p-1 sm:p-1.5 text-text-secondary hover:text-status-error transition-colors"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>
@@ -468,46 +468,46 @@ export default function DeploymentsPage() {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           <button
                             onClick={() => handleViewContainerLogs(container.container_id)}
-                            className="px-3 py-1.5 bg-bg-secondary text-text-secondary font-mono text-[10px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1.5"
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
                             title="View container logs"
                           >
-                            <Terminal size={12} /> Logs
+                            <Terminal size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Logs</span>
                           </button>
                           {container.status === 'running' ? (
                             <>
                               <button
                                 onClick={() => handleRestartContainer(project.id)}
-                                className="px-3 py-1.5 bg-bg-secondary text-text-secondary font-mono text-[10px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1.5"
+                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
                                 title="Restart container"
                               >
-                                <RotateCw size={12} /> Restart
+                                <RotateCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Restart</span>
                               </button>
                               <button
                                 onClick={() => handleStopContainer(project.id)}
-                                className="px-3 py-1.5 bg-bg-secondary text-text-secondary font-mono text-[10px] border border-border-dark rounded hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1.5"
+                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
                                 title="Stop container"
                               >
-                                <Square size={12} /> Stop
+                                <Square size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Stop</span>
                               </button>
                             </>
                           ) : (
                             <button
                               onClick={() => handleStartContainer(project.id, container.id)}
-                              className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[10px] font-bold rounded hover:bg-accent-lime-muted transition-colors flex items-center gap-1.5"
+                              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold rounded hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
                               title="Start container"
                             >
-                              <Play size={12} /> Start
+                              <Play size={11} className="flex-shrink-0" /> <span>Start</span>
                             </button>
                           )}
                           <button
                             onClick={() => handleRemoveContainer(project.id)}
-                            className="px-3 py-1.5 bg-bg-secondary text-text-secondary font-mono text-[10px] border border-border-dark rounded hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1.5"
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark rounded hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
                             title="Remove container"
                           >
-                            <Trash2 size={12} /> Remove
+                            <Trash2 size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Remove</span>
                           </button>
                         </div>
                       </div>

@@ -695,15 +695,18 @@ func (h *deployHandlers) createProject(w http.ResponseWriter, r *http.Request) {
 		p.EnvVars = "{}"
 	}
 
-	// Check for existing project with same repo URL and branch
+	// Check for existing project with same repo URL, branch, and working directory
 	existing, err := h.db.GetProjectByRepoAndBranch(p.RepoURL, p.Branch)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if existing != nil {
-		respondError(w, http.StatusConflict, "A project with this repository URL and branch already exists. Please use the existing project or delete it first.")
-		return
+		// Allow multiple projects from same repo if they have different working directories
+		if existing.WorkingDirectory == p.WorkingDirectory {
+			respondError(w, http.StatusConflict, "A project with this repository URL, branch, and working directory already exists. Please use a different working directory or delete the existing project first.")
+			return
+		}
 	}
 
 	if err := h.db.CreateProject(&p); err != nil {

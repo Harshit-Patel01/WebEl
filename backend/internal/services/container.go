@@ -89,8 +89,31 @@ func (c *ContainerService) FindAvailablePort(startPort, endPort int) (int, error
 func (c *ContainerService) StartContainer(ctx context.Context, projectID, projectName, image string, containerPort int, envVars map[string]string) (*state.Container, error) {
 	containerName := fmt.Sprintf("opendeploy-%s", projectName)
 
-	// Stop and remove existing container if it exists
-	c.StopContainer(ctx, projectID)
+	// Check if container already exists
+	existingContainer, _ := c.db.GetContainerByProjectID(projectID)
+	if existingContainer != nil {
+		// Check if the container still exists in Docker
+		status, err := c.GetContainerStatus(ctx, existingContainer.ContainerID)
+		if err == nil && status != "stopped" && status != "unknown" {
+			// Container exists, stop it first
+			c.logger.Info("stopping existing container before starting new one",
+				zap.String("projectId", projectID),
+				zap.String("containerName", existingContainer.Name),
+			)
+			c.StopContainer(ctx, projectID)
+		}
+
+		// Remove the old container from Docker
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "docker_rm",
+			Command: c.cfg.DockerBinary,
+			Args:    []string{"rm", "-f", existingContainer.ContainerID},
+			Timeout: 15 * time.Second,
+		})
+
+		// Remove from database
+		c.db.DeleteContainer(existingContainer.ID)
+	}
 
 	// Find an available host port
 	hostPort, err := c.FindAvailablePort(8000, 9000)
@@ -223,7 +246,7 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 	return container, nil
 }
 
-// StopContainer stops a running container
+// StopContainer stops a running container without removing it
 func (c *ContainerService) StopContainer(ctx context.Context, projectID string) error {
 	container, err := c.db.GetContainerByProjectID(projectID)
 	if err != nil || container == nil {
@@ -235,20 +258,12 @@ func (c *ContainerService) StopContainer(ctx context.Context, projectID string) 
 		zap.String("containerName", container.Name),
 	)
 
-	// Stop container
+	// Stop container (but don't remove it so it can be restarted)
 	_, err = c.runner.Run(ctx, exec.RunOpts{
 		JobType: "docker_stop",
 		Command: c.cfg.DockerBinary,
 		Args:    []string{"stop", container.ContainerID},
 		Timeout: 30 * time.Second,
-	})
-
-	// Remove container
-	c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_rm",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"rm", "-f", container.ContainerID},
-		Timeout: 15 * time.Second,
 	})
 
 	// Update status in database
