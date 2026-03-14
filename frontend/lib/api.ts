@@ -8,7 +8,7 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
     ...options.headers,
   }
 
-  const response = await fetch(url, { ...options, headers })
+  const response = await fetch(url, { ...options, headers, credentials: 'include' })
 
   if (!response.ok) {
     let errorMsg = `API Error: ${response.status}`
@@ -33,7 +33,7 @@ async function fetchTunnelApi<T>(endpoint: string, apiKey: string, options: Requ
     ...options.headers,
   }
 
-  const response = await fetch(url, { ...options, headers })
+  const response = await fetch(url, { ...options, headers, credentials: 'include' })
 
   if (!response.ok) {
     let errorMsg = `API Error: ${response.status}`
@@ -50,10 +50,20 @@ async function fetchTunnelApi<T>(endpoint: string, apiKey: string, options: Requ
 }
 
 export const authApi = {
-  changePassword: (data: any) => fetchApi<{ status: string }>('/auth/change-password', {
+  login: (password: string) => fetchApi<{ status: string }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  }),
+  setupPassword: (password: string) => fetchApi<{ status: string }>('/auth/setup', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  }),
+  changePassword: (data: { current_password: string; new_password: string }) => fetchApi<{ status: string }>('/auth/change-password', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
+  getStatus: () => fetchApi<{ password_set: boolean; authenticated: boolean }>('/auth/status'),
+  logout: () => fetchApi<{ status: string }>('/auth/logout', { method: 'POST' }),
 }
 
 // System API
@@ -324,4 +334,32 @@ export const envApi = {
       method: 'POST',
       body: JSON.stringify({ content, is_secret: isSecret }),
     }),
+}
+
+// Access Point API
+export const apApi = {
+  getStatus: () => fetchApi<{
+    running: boolean
+    interface: string
+    ssid: string
+    ip_address: string
+    connected_clients: number
+    enabled: boolean
+  }>('/ap/status'),
+  getConfig: () => fetchApi<{
+    id: number
+    ssid: string
+    password: string
+    enabled: boolean
+    channel: number
+    created_at: string
+    updated_at: string
+  }>('/ap/config'),
+  updateConfig: (data: { ssid?: string; password?: string; channel?: number }) =>
+    fetchApi<{ status: string }>('/ap/config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  enable: () => fetchApi<{ status: string }>('/ap/enable', { method: 'POST' }),
+  disable: () => fetchApi<{ status: string }>('/ap/disable', { method: 'POST' }),
 }
