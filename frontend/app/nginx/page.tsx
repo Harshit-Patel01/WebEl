@@ -189,22 +189,24 @@ export default function NginxPage() {
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <SectionBadge label="NGINX" />
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto">
             <button
               onClick={testConfig}
               disabled={testing}
-              className="flex items-center gap-2 px-4 py-2 border border-border-dark  font-mono text-small text-text-secondary hover:text-text-primary transition-colors"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-border-dark font-mono text-[11px] sm:text-small text-text-secondary hover:text-text-primary transition-colors flex-1 sm:flex-initial"
             >
               <RefreshCw size={14} className={testing ? "animate-spin" : ""} />
-              {testing ? 'Testing...' : 'Test Config'}
+              <span className="hidden xs:inline">{testing ? 'Testing...' : 'Test Config'}</span>
+              <span className="xs:hidden">Test</span>
             </button>
             <button
               onClick={reloadNginx}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-accent-lime text-text-dark font-mono font-bold text-[11px] sm:text-small uppercase tracking-wider hover:bg-accent-lime-muted transition-all flex-1 sm:flex-initial"
             >
-              Reload Nginx
+              <span className="hidden xs:inline">Reload Nginx</span>
+              <span className="xs:hidden">Reload</span>
             </button>
           </div>
         </div>

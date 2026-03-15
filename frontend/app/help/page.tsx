@@ -15,7 +15,7 @@ export default function HelpPage() {
         <SectionBadge label="HELP & DOCUMENTATION" />
       </div>
 
-      <div className="max-w-4xl">
+      <div>
         {/* Introduction */}
         <section className="mb-12">
           <div className="flex items-center gap-3 mb-4">
