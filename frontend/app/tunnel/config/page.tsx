@@ -118,10 +118,6 @@ function TunnelConfigContent() {
       return
     }
 
-    if (port === 80) {
-      setError('Port 80 is reserved for the OpenDeploy dashboard')
-      return
-    }
 
     setSubmitting(true)
     setError('')
