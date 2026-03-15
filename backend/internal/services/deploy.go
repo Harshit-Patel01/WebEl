@@ -298,13 +298,6 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 		buildCmd = "build"
 	}
 
-	// Check if the build script exists in package.json
-	if pkgJSON.Scripts != nil {
-		if _, exists := pkgJSON.Scripts[buildCmd]; !exists {
-			return nil, fmt.Errorf("build script '%s' not found in package.json. Available scripts: %v", buildCmd, pkgJSON.Scripts)
-		}
-	}
-
 	d.logger.Info("running npm build", zap.String("dir", dir), zap.String("cmd", buildCmd))
 
 	// Log to database immediately
