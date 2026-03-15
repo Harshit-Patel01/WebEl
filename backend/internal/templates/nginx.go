@@ -11,6 +11,7 @@ type NginxTemplateData struct {
 	FrontendPath string
 	ProxyEnabled bool
 	ProxyPort    int
+	ProxyTarget  string
 }
 
 const nginxTemplate = `server {
@@ -40,10 +41,12 @@ const nginxTemplate = `server {
 {{- end}}
 
 {{- if .ProxyEnabled}}
+{{- $proxyTarget := .ProxyTarget}}
+{{- if eq $proxyTarget ""}}{{$proxyTarget = "localhost"}}{{end}}
 
     # WebSocket proxy
     location /ws {
-        proxy_pass http://localhost:{{.ProxyPort}};
+        proxy_pass http://{{$proxyTarget}}:{{.ProxyPort}};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -57,7 +60,7 @@ const nginxTemplate = `server {
 
     # Backend - reverse proxy
     location /api/ {
-        proxy_pass http://localhost:{{.ProxyPort}};
+        proxy_pass http://{{$proxyTarget}}:{{.ProxyPort}};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
