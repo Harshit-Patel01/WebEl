@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Package, Play, Square, RotateCw, Trash2, Terminal, ExternalLink, Clock, User, Key, RefreshCw, Plus, Eye, EyeOff, Upload, X, Folder, Activity, Wifi } from 'lucide-react'
+import { Package, Play, Square, RotateCw, Trash2, Terminal, ExternalLink, Clock, User, Key, RefreshCw, Plus, Eye, EyeOff, Upload, X, Folder, Activity, Wifi, ChevronDown, ChevronUp } from 'lucide-react'
 import Link from 'next/link'
 import SectionBadge from '@/components/ui/SectionBadge'
 import DeployLogStream from '@/components/ui/DeployLogStream'
@@ -78,6 +78,7 @@ export default function DeploymentsPage() {
   const [bulkContent, setBulkContent] = useState('')
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [cleanupReport, setCleanupReport] = useState<{orphan_containers_removed: number, stale_deploys_fixed: number} | null>(null)
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     loadProjects()
@@ -427,27 +428,28 @@ export default function DeploymentsPage() {
                       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap">
                         <button
                           onClick={() => { setSelectedProjectId(project.id); setShowEnvModal(true); loadEnvVars(project.id) }}
-                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold  hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
                         >
                           <Key size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Env</span>
                         </button>
                         <button
                           onClick={() => handleRebuild(project.id)}
-                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold  hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
                         >
                           <RefreshCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Rebuild</span>
                         </button>
                         <button
                           onClick={() => handleRedeploy(project.id)}
-                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold  hover:bg-accent-lime-muted transition-colors"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold hover:bg-accent-lime-muted transition-colors"
                         >
                           Deploy
                         </button>
                         <button
                           onClick={() => handleDeleteProject(project.id)}
-                          className="p-1 sm:p-1.5 text-text-secondary hover:text-status-error transition-colors"
+                          className="px-2 sm:px-3 py-1 sm:py-1.5 border border-border-dark text-text-secondary hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
+                          title="Delete project"
                         >
-                          <Trash2 size={13} />
+                          <Trash2 size={11} className="flex-shrink-0" />
                         </button>
                       </div>
                     </div>
@@ -546,13 +548,14 @@ export default function DeploymentsPage() {
                       )}
                     </div>
                     {projectDeploys.length === 0 ? (
-                      <div className="text-center py-8 bg-bg-primary/30  border border-border-dark">
+                      <div className="text-center py-8 bg-bg-primary/30 border border-border-dark">
                         <Package size={32} className="mx-auto mb-2 text-border-dark" />
                         <p className="font-mono text-[11px] text-text-secondary">No deployments yet</p>
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        {projectDeploys.slice(0, 5).map(deploy => {
+                      <>
+                        <div className="space-y-2">
+                          {projectDeploys.slice(0, expandedProjects[project.id] ? projectDeploys.length : 5).map(deploy => {
                           let portMapping = null
                           if (deploy.port_mappings) {
                             try {
@@ -638,6 +641,25 @@ export default function DeploymentsPage() {
                           )
                         })}
                       </div>
+                      {projectDeploys.length > 5 && (
+                        <button
+                          onClick={() => setExpandedProjects(prev => ({ ...prev, [project.id]: !prev[project.id] }))}
+                          className="w-full mt-4 py-3 border border-border-dark text-text-secondary hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center justify-center gap-2 font-mono text-[11px] uppercase tracking-wider"
+                        >
+                          {expandedProjects[project.id] ? (
+                            <>
+                              <ChevronUp size={16} />
+                              Show Less
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown size={16} />
+                              Show All ({projectDeploys.length})
+                            </>
+                          )}
+                        </button>
+                      )}
+                      </>
                     )}
                   </div>
                 </motion.div>
