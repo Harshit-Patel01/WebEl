@@ -53,6 +53,11 @@ export default function DeployPage() {
   const [cloudflareZones, setCloudflareZones] = useState<{ id: string; name: string }[]>([])
   const [selectedZoneId, setSelectedZoneId] = useState('')
   const [loadingZones, setLoadingZones] = useState(false)
+  const [deploymentTarget, setDeploymentTarget] = useState<'nginx' | 'tunnel' | 'both'>('nginx')
+  const [tunnelPort, setTunnelPort] = useState('')
+  const [tunnelScheme, setTunnelScheme] = useState('http')
+  const [hasTunnelSetup, setHasTunnelSetup] = useState(false)
+  const [checkingTunnel, setCheckingTunnel] = useState(true)
 
   const { subscribe } = useWebSocket()
 
@@ -73,7 +78,30 @@ export default function DeployPage() {
       }
     }
 
+    const checkTunnel = async () => {
+      setCheckingTunnel(true)
+      try {
+        const apiKey = apiKeyStorage.get()
+        if (!apiKey) {
+          setHasTunnelSetup(false)
+          setCheckingTunnel(false)
+          return
+        }
+
+        const status = await fetch('/api/v1/tunnel/status', {
+          credentials: 'include'
+        }).then(r => r.json())
+
+        setHasTunnelSetup(status.status !== 'not_configured')
+      } catch (err) {
+        setHasTunnelSetup(false)
+      } finally {
+        setCheckingTunnel(false)
+      }
+    }
+
     loadZones()
+    checkTunnel()
   }, [])
 
   // Auto-detect project name from repo URL
@@ -91,9 +119,11 @@ export default function DeployPage() {
     if (projectType === 'backend') {
       setBuildCmd('')
       setOutputDir('')
+      setTunnelPort('8000')
     } else {
       setBuildCmd('npm run build')
       setOutputDir('')
+      setTunnelPort('3001')
     }
   }, [projectType])
 
@@ -204,6 +234,12 @@ export default function DeployPage() {
           deployId: res.deploy_id,
         }))
       }
+
+      // 4. If tunnel deployment is selected, create tunnel route after deployment
+      if ((deploymentTarget === 'tunnel' || deploymentTarget === 'both') && hasTunnelSetup) {
+        // Wait for deployment to complete before creating tunnel route
+        // This will be handled in handleDeployComplete
+      }
     } catch (err: any) {
       setError(`Failed to start deployment: ${err.message || err}`)
       setState('form')
@@ -211,7 +247,7 @@ export default function DeployPage() {
     }
   }
 
-  const handleDeployComplete = (result: {
+  const handleDeployComplete = async (result: {
     status: string
     outputPath?: string
     framework?: string
@@ -224,7 +260,36 @@ export default function DeployPage() {
       ...prev,
       ...result,
     }))
+
     if (result.status === 'success') {
+      // Create tunnel route if tunnel deployment is selected
+      if ((deploymentTarget === 'tunnel' || deploymentTarget === 'both') && hasTunnelSetup && domain) {
+        try {
+          const apiKey = apiKeyStorage.get()
+          if (apiKey && selectedZoneId && tunnelPort) {
+            const fullDomain = subdomain ? `${subdomain}.${domain}` : domain
+
+            await fetch('/api/v1/tunnel/routes', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CF-API-Key': apiKey
+              },
+              credentials: 'include',
+              body: JSON.stringify({
+                hostname: fullDomain,
+                zone_id: selectedZoneId,
+                local_scheme: tunnelScheme,
+                local_port: parseInt(tunnelPort, 10)
+              })
+            })
+          }
+        } catch (err) {
+          console.error('Failed to create tunnel route:', err)
+          // Don't fail the deployment, just log the error
+        }
+      }
+
       setState('success')
     } else {
       setState('failed')
@@ -283,6 +348,26 @@ export default function DeployPage() {
                   <span className="text-text-secondary">Build time: </span>
                   <span className="text-text-primary">{deployResult.buildDuration.toFixed(1)}s</span>
                 </p>
+              )}
+              {(deploymentTarget === 'tunnel' || deploymentTarget === 'both') && domain && (
+                <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800/50 ">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Globe size={14} className="text-blue-400" />
+                    <span className="text-text-secondary text-xs">Cloudflare Tunnel:</span>
+                  </div>
+                  <a
+                    href={`https://${subdomain ? `${subdomain}.${domain}` : domain}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 text-sm break-all hover:underline flex items-center gap-1"
+                  >
+                    https://{subdomain ? `${subdomain}.${domain}` : domain}
+                    <ExternalLink size={12} />
+                  </a>
+                  <p className="text-text-secondary text-[10px] mt-2">
+                    Your app is now accessible via Cloudflare Tunnel with automatic HTTPS
+                  </p>
+                </div>
               )}
               {deployResult.outputPath && !deployResult.isBackend && (
                 <div className="mt-4 p-3 bg-bg-primary  border border-accent-lime/30">
@@ -607,6 +692,71 @@ export default function DeployPage() {
                     </label>
                   </div>
 
+                  {/* Deployment Target Selection */}
+                  {!checkingTunnel && (
+                    <div className="mb-4">
+                      <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                        Deployment Target
+                      </label>
+                      <div className="grid grid-cols-3 gap-2 bg-bg-primary p-1.5">
+                        <button
+                          onClick={() => setDeploymentTarget('nginx')}
+                          disabled={deploying}
+                          className={`px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-all ${
+                            deploymentTarget === 'nginx'
+                              ? 'bg-accent-lime text-text-dark font-bold'
+                              : 'text-text-secondary hover:text-text-primary'
+                          }`}
+                        >
+                          Nginx Only
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (!hasTunnelSetup) {
+                              if (confirm('Cloudflare Tunnel is not set up. Would you like to set it up now?')) {
+                                window.location.href = '/tunnel/dashboard'
+                              }
+                              return
+                            }
+                            setDeploymentTarget('tunnel')
+                          }}
+                          disabled={deploying}
+                          className={`px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-all ${
+                            deploymentTarget === 'tunnel'
+                              ? 'bg-accent-lime text-text-dark font-bold'
+                              : 'text-text-secondary hover:text-text-primary'
+                          } ${!hasTunnelSetup ? 'opacity-50' : ''}`}
+                        >
+                          Tunnel Only
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (!hasTunnelSetup) {
+                              if (confirm('Cloudflare Tunnel is not set up. Would you like to set it up now?')) {
+                                window.location.href = '/tunnel/dashboard'
+                              }
+                              return
+                            }
+                            setDeploymentTarget('both')
+                          }}
+                          disabled={deploying}
+                          className={`px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-all ${
+                            deploymentTarget === 'both'
+                              ? 'bg-accent-lime text-text-dark font-bold'
+                              : 'text-text-secondary hover:text-text-primary'
+                          } ${!hasTunnelSetup ? 'opacity-50' : ''}`}
+                        >
+                          Both
+                        </button>
+                      </div>
+                      <p className="mt-2 font-mono text-[10px] text-text-secondary">
+                        {deploymentTarget === 'nginx' && 'Deploy with nginx configuration only'}
+                        {deploymentTarget === 'tunnel' && 'Deploy via Cloudflare Tunnel (automatic HTTPS)'}
+                        {deploymentTarget === 'both' && 'Deploy with both nginx and Cloudflare Tunnel'}
+                      </p>
+                    </div>
+                  )}
+
                   {cloudflareZones.length > 0 && !manualDomain ? (
                     <div className="space-y-3">
                       <div>
@@ -657,6 +807,52 @@ export default function DeployPage() {
                         </div>
                       )}
 
+                      {/* Tunnel-specific configuration */}
+                      {(deploymentTarget === 'tunnel' || deploymentTarget === 'both') && selectedZoneId && (
+                        <div className="mt-4 p-4 bg-blue-900/20 border border-blue-800/50 ">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Globe size={14} className="text-blue-400" />
+                            <span className="font-mono text-[11px] text-blue-400 font-bold uppercase">Tunnel Configuration</span>
+                          </div>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block font-mono text-[10px] text-blue-300 mb-1">
+                                Local Port
+                              </label>
+                              <input
+                                type="number"
+                                value={tunnelPort}
+                                onChange={(e) => setTunnelPort(e.target.value)}
+                                disabled={deploying}
+                                className="w-full px-3 py-2 bg-bg-primary border border-blue-800/50  font-mono text-small text-text-primary disabled:opacity-50"
+                                placeholder={projectType === 'backend' ? '8000' : '3001'}
+                                min="1"
+                                max="65535"
+                              />
+                            </div>
+                            <div>
+                              <label className="block font-mono text-[10px] text-blue-300 mb-1">
+                                Protocol
+                              </label>
+                              <select
+                                value={tunnelScheme}
+                                onChange={(e) => setTunnelScheme(e.target.value)}
+                                disabled={deploying}
+                                className="w-full px-3 py-2 bg-bg-primary border border-blue-800/50  font-mono text-small text-text-primary disabled:opacity-50"
+                              >
+                                <option value="http">HTTP</option>
+                                <option value="https">HTTPS</option>
+                              </select>
+                            </div>
+                            <p className="font-mono text-[10px] text-blue-300">
+                              ✓ Automatic HTTPS via Cloudflare<br/>
+                              ✓ DNS record created automatically<br/>
+                              ✓ Global CDN and DDoS protection
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       <button
                         onClick={() => setManualDomain(true)}
                         disabled={deploying}
@@ -697,21 +893,31 @@ export default function DeployPage() {
 
                   {domain && (
                     <div className="mt-3">
-                      <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
-                        <input
-                          type="checkbox"
-                          checked={enableNginx}
-                          onChange={(e) => setEnableNginx(e.target.checked)}
-                          disabled={deploying}
-                          className="accent-accent-lime"
-                        />
-                        Auto-configure nginx for this domain
-                      </label>
+                      {deploymentTarget === 'nginx' && (
+                        <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
+                          <input
+                            type="checkbox"
+                            checked={enableNginx}
+                            onChange={(e) => setEnableNginx(e.target.checked)}
+                            disabled={deploying}
+                            className="accent-accent-lime"
+                          />
+                          Auto-configure nginx for this domain
+                        </label>
+                      )}
                       <p className="mt-2 font-mono text-[10px] text-text-secondary">
-                        {subdomain ? (
-                          <>Nginx will route {subdomain}.{domain} (/ to frontend, /api and /ws to backend if applicable)</>
-                        ) : (
-                          <>Nginx will route / to frontend and /api, /ws to backend (if applicable)</>
+                        {deploymentTarget === 'nginx' && (
+                          subdomain ? (
+                            <>Nginx will route {subdomain}.{domain} (/ to frontend, /api and /ws to backend if applicable)</>
+                          ) : (
+                            <>Nginx will route / to frontend and /api, /ws to backend (if applicable)</>
+                          )
+                        )}
+                        {deploymentTarget === 'tunnel' && (
+                          <>Your app will be accessible at https://{subdomain ? `${subdomain}.${domain}` : domain} via Cloudflare Tunnel</>
+                        )}
+                        {deploymentTarget === 'both' && (
+                          <>Nginx will serve locally and Cloudflare Tunnel will provide public HTTPS access</>
                         )}
                       </p>
                     </div>

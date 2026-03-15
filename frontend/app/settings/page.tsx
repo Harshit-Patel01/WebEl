@@ -561,9 +561,9 @@ export default function SettingsPage() {
                   <div className="space-y-4 font-mono text-small">
                     {[
                       ['Version', '1.0.0'],
-                      ['Build', '2024.01.15-abc123'],
+                      ['Build', '2026.03.15-abc123'],
                       ['License', 'MIT'],
-                      ['Author', 'OpenDeploy Team'],
+                      ['Author', 'Harshit Singh Patel'],
                     ].map(([label, value]) => (
                       <div key={label} className="flex items-center justify-between py-2 border-b border-border-dark">
                         <span className="text-text-secondary">{label}</span>

@@ -40,6 +40,7 @@ export default function NginxPage() {
   const [frontendPath, setFrontendPath] = useState('/var/www/opendeploy/frontend/dist')
   const [proxyEnabled, setProxyEnabled] = useState(true)
   const [proxyPort, setProxyPort] = useState('8000')
+  const [proxyTarget, setProxyTarget] = useState('localhost')
   const [generatorState, setGeneratorState] = useState<'form' | 'testing' | 'success'>('form')
 
   const fetchFiles = async () => {
@@ -164,7 +165,8 @@ export default function NginxPage() {
         project_id: 'default',
         frontend_path: frontendPath,
         proxy_enabled: proxyEnabled,
-        proxy_port: parseInt(proxyPort, 10)
+        proxy_port: parseInt(proxyPort, 10),
+        proxy_target: proxyTarget
       })
       const testRes = await nginxApi.testConfig()
       if (testRes.success) {
@@ -447,12 +449,33 @@ export default function NginxPage() {
                     </button>
                   </div>
                   {proxyEnabled && (
-                    <input
-                      value={proxyPort}
-                      onChange={e => setProxyPort(e.target.value)}
-                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
-                      placeholder="8000"
-                    />
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block font-mono text-label text-text-secondary mb-1">
+                          Proxy Target
+                        </label>
+                        <input
+                          value={proxyTarget}
+                          onChange={e => setProxyTarget(e.target.value)}
+                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
+                          placeholder="localhost or tunnel domain"
+                        />
+                        <p className="mt-1 font-mono text-label text-text-secondary">
+                          Use 'localhost' for local backend or tunnel domain for remote backend
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block font-mono text-label text-text-secondary mb-1">
+                          Port
+                        </label>
+                        <input
+                          value={proxyPort}
+                          onChange={e => setProxyPort(e.target.value)}
+                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary"
+                          placeholder="8000"
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
 

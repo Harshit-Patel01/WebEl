@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Package, Play, Square, RotateCw, Trash2, Terminal, ExternalLink, Clock, User, Key, RefreshCw, Plus, Eye, EyeOff, Upload, X, Folder, Activity, Wifi, ChevronDown, ChevronUp } from 'lucide-react'
+import { Package, Play, Square, RotateCw, Trash2, Terminal, ExternalLink, Clock, User, Key, RefreshCw, Plus, Eye, EyeOff, Upload, X, Folder, Activity, Wifi, ChevronDown, ChevronUp, Cloud, Globe } from 'lucide-react'
 import Link from 'next/link'
 import SectionBadge from '@/components/ui/SectionBadge'
 import DeployLogStream from '@/components/ui/DeployLogStream'
 import { deployApi, cleanupApi } from '@/lib/api'
+import { apiKeyStorage } from '@/utils/apiKey'
 
 type Project = {
   id: string
@@ -79,9 +80,18 @@ export default function DeploymentsPage() {
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [cleanupReport, setCleanupReport] = useState<{orphan_containers_removed: number, stale_deploys_fixed: number} | null>(null)
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
+  const [showTunnelModal, setShowTunnelModal] = useState(false)
+  const [tunnelProjectId, setTunnelProjectId] = useState<string | null>(null)
+  const [tunnelDomain, setTunnelDomain] = useState('')
+  const [tunnelPort, setTunnelPort] = useState('')
+  const [tunnelScheme, setTunnelScheme] = useState('http')
+  const [creatingTunnel, setCreatingTunnel] = useState(false)
+  const [hasTunnelSetup, setHasTunnelSetup] = useState(false)
+  const [checkingTunnel, setCheckingTunnel] = useState(true)
 
   useEffect(() => {
     loadProjects()
+    checkTunnelSetup()
   }, [])
 
   // Auto-refresh running deploys every 5 seconds
@@ -202,6 +212,133 @@ export default function DeploymentsPage() {
     const report = await cleanupApi.runCleanup()
     setCleanupReport(report)
     loadProjects()
+  }
+
+  const checkTunnelSetup = async () => {
+    setCheckingTunnel(true)
+    try {
+      const apiKey = apiKeyStorage.get()
+      if (!apiKey) {
+        setHasTunnelSetup(false)
+        setCheckingTunnel(false)
+        return
+      }
+
+      // Check if tunnel is configured
+      const status = await fetch('/api/v1/tunnel/status', {
+        credentials: 'include'
+      }).then(r => r.json())
+
+      setHasTunnelSetup(status.status !== 'not_configured')
+    } catch (err) {
+      setHasTunnelSetup(false)
+    } finally {
+      setCheckingTunnel(false)
+    }
+  }
+
+  const handleOpenTunnelModal = (projectId: string) => {
+    // Check if tunnel is set up
+    if (!hasTunnelSetup) {
+      if (confirm('Cloudflare Tunnel is not set up. Would you like to set it up now?')) {
+        window.location.href = '/tunnel/dashboard'
+      }
+      return
+    }
+
+    setTunnelProjectId(projectId)
+    setShowTunnelModal(true)
+    setTunnelDomain('')
+    setTunnelPort('')
+    setTunnelScheme('http')
+
+    // Auto-detect port from container if available
+    const project = projects.find(p => p.id === projectId)
+    if (project) {
+      const projectContainers = containers[projectId] || []
+      const container = projectContainers[0]
+      if (container?.port_mappings) {
+        try {
+          const mapping = JSON.parse(container.port_mappings)
+          if (mapping.host) {
+            setTunnelPort(mapping.host)
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+    }
+  }
+
+  const handleCreateTunnelRoute = async () => {
+    if (!tunnelProjectId || !tunnelDomain || !tunnelPort) {
+      alert('Please fill in all fields')
+      return
+    }
+
+    setCreatingTunnel(true)
+    try {
+      const apiKey = apiKeyStorage.get()
+      if (!apiKey) {
+        alert('Cloudflare API key not found. Please set up tunnel first.')
+        setCreatingTunnel(false)
+        return
+      }
+
+      // Get project to determine port
+      const project = projects.find(p => p.id === tunnelProjectId)
+      if (!project) {
+        throw new Error('Project not found')
+      }
+
+      // Get zones to find zone_id for domain
+      const zones = await fetch('/api/v1/tunnel/zones/stored', {
+        headers: { 'X-CF-API-Key': apiKey },
+        credentials: 'include'
+      }).then(r => {
+        if (!r.ok) throw new Error('Failed to fetch zones')
+        return r.json()
+      })
+
+      const domainParts = tunnelDomain.split('.')
+      const rootDomain = domainParts.slice(-2).join('.')
+      const zone = zones.find((z: any) => z.name === rootDomain)
+
+      if (!zone) {
+        throw new Error(`Zone not found for domain ${rootDomain}. Make sure the domain is added to your Cloudflare account.`)
+      }
+
+      // Create tunnel route
+      const response = await fetch('/api/v1/tunnel/routes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CF-API-Key': apiKey
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          hostname: tunnelDomain,
+          zone_id: zone.id,
+          local_scheme: tunnelScheme,
+          local_port: parseInt(tunnelPort, 10)
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Failed to create tunnel route')
+      }
+
+      setShowTunnelModal(false)
+      alert(`Tunnel route created successfully! Your app is now accessible at https://${tunnelDomain}`)
+
+      // Reload to show updated status
+      loadProjects()
+    } catch (err: any) {
+      alert('Failed to create tunnel route: ' + err.message)
+    } finally {
+      setCreatingTunnel(false)
+    }
   }
 
   const loadEnvVars = async (projectId: string) => {
@@ -426,6 +563,15 @@ export default function DeploymentsPage() {
                       </div>
 
                       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap">
+                        {!checkingTunnel && (
+                          <button
+                            onClick={() => handleOpenTunnelModal(project.id)}
+                            className={`px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1 ${!hasTunnelSetup ? 'opacity-50' : ''}`}
+                            title={!hasTunnelSetup ? 'Set up Cloudflare Tunnel first' : 'Deploy via Cloudflare Tunnel'}
+                          >
+                            <Cloud size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Tunnel</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => { setSelectedProjectId(project.id); setShowEnvModal(true); loadEnvVars(project.id) }}
                           className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
@@ -711,6 +857,127 @@ export default function DeploymentsPage() {
                 {containerLogs.map((log, i) => (
                   <div key={i} className="text-text-primary whitespace-pre-wrap">{log}</div>
                 ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Cloudflare Tunnel Modal */}
+        {showTunnelModal && (
+          <div
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowTunnelModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-bg-secondary  border border-border-dark p-6 max-w-2xl w-full"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="font-serif text-h3 mb-2">Deploy via Cloudflare Tunnel</h3>
+                  <p className="font-mono text-small text-text-secondary">
+                    Expose this deployment through a Cloudflare Tunnel
+                  </p>
+                </div>
+                <button onClick={() => setShowTunnelModal(false)} className="text-text-secondary hover:text-text-primary">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block font-mono text-label uppercase tracking-wider text-text-secondary mb-2">
+                    Domain
+                  </label>
+                  <input
+                    type="text"
+                    value={tunnelDomain}
+                    onChange={e => setTunnelDomain(e.target.value)}
+                    placeholder="app.yourdomain.com"
+                    className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary focus:outline-none focus:border-accent-lime"
+                  />
+                  <p className="mt-1 font-mono text-label text-text-secondary">
+                    Full domain including subdomain (e.g., api.example.com)
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-mono text-label uppercase tracking-wider text-text-secondary mb-2">
+                      Local Port
+                    </label>
+                    <input
+                      type="number"
+                      value={tunnelPort}
+                      onChange={e => setTunnelPort(e.target.value)}
+                      placeholder="8000"
+                      min="1"
+                      max="65535"
+                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary focus:outline-none focus:border-accent-lime"
+                    />
+                    <p className="mt-1 font-mono text-label text-text-secondary">
+                      {tunnelPort && `Port ${tunnelPort} will be exposed`}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block font-mono text-label uppercase tracking-wider text-text-secondary mb-2">
+                      Protocol
+                    </label>
+                    <select
+                      value={tunnelScheme}
+                      onChange={e => setTunnelScheme(e.target.value)}
+                      className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary focus:outline-none focus:border-accent-lime"
+                    >
+                      <option value="http">HTTP</option>
+                      <option value="https">HTTPS</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-blue-900/20 border border-blue-800/50 ">
+                  <div className="flex items-start gap-3">
+                    <Globe size={20} className="text-blue-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-mono text-small text-blue-400 mb-2">
+                        This will create a Cloudflare Tunnel route to expose your deployment
+                      </p>
+                      <ul className="font-mono text-label text-blue-300 space-y-1">
+                        <li>• DNS record will be created automatically</li>
+                        <li>• Traffic will be routed through Cloudflare</li>
+                        <li>• SSL/TLS is handled by Cloudflare</li>
+                        <li>• Your app will be accessible at https://{tunnelDomain || 'your-domain.com'}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCreateTunnelRoute}
+                  disabled={creatingTunnel || !tunnelDomain || !tunnelPort}
+                  className="flex-1 px-6 py-3 bg-accent-lime text-text-dark font-mono font-bold text-small uppercase tracking-wider  hover:bg-accent-lime-muted transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {creatingTunnel ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Cloud size={16} />
+                      Create Tunnel Route
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowTunnelModal(false)}
+                  className="px-6 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary hover:bg-border-dark transition-all"
+                >
+                  Cancel
+                </button>
               </div>
             </motion.div>
           </div>

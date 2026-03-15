@@ -23,6 +23,7 @@ type NginxSiteConfig struct {
 	FrontendPath string `json:"frontend_path"`
 	ProxyEnabled bool   `json:"proxy_enabled"`
 	ProxyPort    int    `json:"proxy_port"`
+	ProxyTarget  string `json:"proxy_target"`
 }
 
 type NginxTestResult struct {
@@ -57,6 +58,7 @@ func (n *NginxService) GenerateConfig(siteCfg NginxSiteConfig) string {
 		FrontendPath: siteCfg.FrontendPath,
 		ProxyEnabled: siteCfg.ProxyEnabled,
 		ProxyPort:    siteCfg.ProxyPort,
+		ProxyTarget:  siteCfg.ProxyTarget,
 	})
 }
 
