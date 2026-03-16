@@ -55,12 +55,14 @@ type DeployOptions struct {
 
 func NewDeployService(runner *exec.Runner, db *state.DB, cfg config.DeployConfig, logger *zap.Logger) *DeployService {
 	docker := NewDockerService(runner, cfg, logger)
+	container := NewContainerService(runner, db, cfg, logger)
 	return &DeployService{
-		runner: runner,
-		db:     db,
-		cfg:    cfg,
-		logger: logger,
-		docker: docker,
+		runner:    runner,
+		db:        db,
+		cfg:       cfg,
+		logger:    logger,
+		docker:    docker,
+		container: container,
 	}
 }
 
@@ -616,6 +618,184 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		projectType := ProjectType(project.ProjectType)
 		if projectType == "" {
 			projectType = d.DetectProjectType(project.ID)
+		}
+
+		// Check if this is a Full Stack deployment
+		isFullStack := project.ProjectType == "fullstack"
+
+		if isFullStack {
+			var outputPath string
+			logToDB("stdout", "Full Stack deployment detected")
+			logToDB("stdout", fmt.Sprintf("Frontend directory: %s", project.WorkingDirectory))
+			logToDB("stdout", fmt.Sprintf("Backend directory: %s", project.BackendWorkingDirectory))
+
+			// Build Frontend
+			d.broadcastPhase(deployID, "build", "Building frontend...")
+			logToDB("stdout", "Building frontend...")
+
+			frontendDir := project.WorkingDirectory
+			if frontendDir == "" {
+				frontendDir = "frontend"
+			}
+
+			_, err = d.BuildNode(deployCtx, project.ID, frontendDir, project.BuildCommand, project.OutputDir, envVars, deployID+"-frontend")
+			if err != nil {
+				logToDB("stderr", fmt.Sprintf("Frontend build failed: %s", err.Error()))
+				d.failDeploy(deploy, err.Error())
+				return
+			}
+			logToDB("stdout", "Frontend build completed successfully")
+
+			// Copy frontend to nginx
+			d.broadcastPhase(deployID, "service", "Deploying frontend...")
+			logToDB("stdout", "Deploying frontend static files...")
+			outputPath, err = d.copyFrontendToNginx(project.ID, project.Name, frontendDir, project.OutputDir)
+			if err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to deploy frontend: %s", err.Error()))
+				d.failDeploy(deploy, err.Error())
+				return
+			}
+			logToDB("stdout", fmt.Sprintf("Frontend deployed to: %s", outputPath))
+
+			// Build Backend
+			d.broadcastPhase(deployID, "build", "Building backend...")
+			logToDB("stdout", "Building backend...")
+
+			backendDir := project.BackendWorkingDirectory
+			if backendDir == "" {
+				backendDir = "backend"
+			}
+
+			// Detect backend framework
+			backendProjectDir := filepath.Join(projectDir, backendDir)
+			backendFramework := d.docker.DetectFramework(backendProjectDir)
+			logToDB("stdout", fmt.Sprintf("Backend framework: %s", backendFramework))
+
+			deploy.Framework = fmt.Sprintf("fullstack_%s", backendFramework)
+			deploy.IsBackend = true
+
+			// Build backend in Docker
+			port := project.LocalPort
+			if port == 0 {
+				port = GetDefaultPort(backendFramework)
+			}
+
+			backendInstallCmd := project.BackendInstallCommand
+			if backendInstallCmd == "" {
+				backendInstallCmd = GetDefaultInstallCommand(backendFramework)
+			}
+
+			// Run backend build command if provided (for custom build steps)
+			if project.BackendBuildCommand != "" {
+				logToDB("stdout", fmt.Sprintf("Running backend build command: %s", project.BackendBuildCommand))
+				buildResult, buildErr := d.runner.Run(deployCtx, exec.RunOpts{
+					JobID:          deployID + "-backend-build",
+					BroadcastJobID: deployID,
+					JobType:        "backend_build",
+					Command:        "/bin/sh",
+					Args:           []string{"-c", project.BackendBuildCommand},
+					WorkDir:        backendProjectDir,
+					Env:            envVars,
+					MergeEnv:       true,
+					Timeout:        d.cfg.BuildTimeout,
+				})
+				if buildResult != nil {
+					for _, line := range buildResult.Lines {
+						dbLog := &state.DeployLog{
+							DeployID:     deployID,
+							Stream:       line.Stream,
+							Message:      line.Text,
+							LogTimestamp: line.Timestamp,
+						}
+						d.db.CreateDeployLog(dbLog)
+					}
+				}
+				if buildErr != nil || (buildResult != nil && !buildResult.Success) {
+					logToDB("stderr", "Backend build command failed")
+					d.failDeploy(deploy, "Backend build command failed")
+					return
+				}
+				logToDB("stdout", "Backend build command completed successfully")
+			}
+
+			startCmd := ""
+			if project.StartCommand != nil && *project.StartCommand != "" {
+				startCmd = *project.StartCommand
+			} else {
+				startCmd = GetDefaultStartCommand(backendFramework, port)
+			}
+
+			dockerResult, dockerErr := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-backend", backendFramework, backendInstallCmd, startCmd, port, envVars, backendDir, "")
+			if dockerResult != nil {
+				for _, line := range dockerResult.Lines {
+					dbLog := &state.DeployLog{
+						DeployID:     deployID,
+						Stream:       line.Stream,
+						Message:      line.Text,
+						LogTimestamp: line.Timestamp,
+					}
+					d.db.CreateDeployLog(dbLog)
+				}
+			}
+			if dockerErr != nil {
+				logToDB("stderr", fmt.Sprintf("Backend build failed: %s", dockerErr.Error()))
+				d.failDeploy(deploy, dockerErr.Error())
+				return
+			}
+			logToDB("stdout", "Backend build completed successfully")
+
+			// Start backend container
+			d.broadcastPhase(deployID, "service", "Starting backend service...")
+			logToDB("stdout", "Starting backend container...")
+
+			imageName := fmt.Sprintf("opendeploy/%s:latest", project.ID)
+			if d.container != nil {
+				container, containerErr := d.container.StartContainer(deployCtx, project.ID, project.Name, imageName, port, envVars)
+				if containerErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to start backend container: %s", containerErr.Error()))
+					d.logger.Error("failed to start backend container", zap.String("projectId", project.ID), zap.Error(containerErr))
+				} else {
+					logToDB("stdout", fmt.Sprintf("Backend container started: %s (port %d)", container.Name, port))
+					d.logger.Info("backend container started", zap.String("projectId", project.ID), zap.String("containerName", container.Name))
+				}
+			}
+
+			// Configure nginx for Full Stack
+			if opts != nil && opts.EnableNginx && opts.Domain != "" {
+				logToDB("stdout", "Configuring nginx for Full Stack deployment...")
+				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, outputPath, true); err != nil {
+					logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
+				} else {
+					logToDB("stdout", fmt.Sprintf("Nginx configured: frontend at /, backend at /api (port %d)", port))
+				}
+			}
+
+			// Success
+			now := time.Now()
+			buildDuration := now.Sub(buildStart).Seconds()
+			deploy.Status = "success"
+			deploy.EndedAt = &now
+			deploy.ExitCode = 0
+			deploy.OutputPath = outputPath
+			deploy.BuildDuration = buildDuration
+			d.db.UpdateDeploy(deploy)
+
+			logToDB("stdout", "")
+			logToDB("stdout", fmt.Sprintf("Full Stack deployment completed successfully! (%.1fs)", buildDuration))
+
+			if d.broadcaster != nil {
+				d.broadcaster.BroadcastToJob(deployID, map[string]interface{}{
+					"type":          "deploy_result",
+					"deployId":      deployID,
+					"status":        "success",
+					"framework":     deploy.Framework,
+					"outputPath":    outputPath,
+					"isBackend":     true,
+					"buildDuration": buildDuration,
+				})
+			}
+			d.broadcastPhase(deployID, "done", "Full Stack deploy complete!")
+			return
 		}
 
 		// Override projectType based on framework for pure static sites

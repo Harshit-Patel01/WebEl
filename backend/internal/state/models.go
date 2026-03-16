@@ -9,20 +9,23 @@ type SetupState struct {
 }
 
 type Project struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	RepoURL          string    `json:"repo_url"`
-	Branch           string    `json:"branch"`
-	ProjectType      string    `json:"project_type"`
-	BuildCommand     string    `json:"build_command"`
-	InstallCommand   *string   `json:"install_command,omitempty"`
-	StartCommand     *string   `json:"start_command,omitempty"`
-	OutputDir        string    `json:"output_dir"`
-	WorkingDirectory string    `json:"working_directory,omitempty"`
-	LocalPort        int       `json:"local_port,omitempty"`
-	EnvVars          string    `json:"env_vars"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID                       string    `json:"id"`
+	Name                     string    `json:"name"`
+	RepoURL                  string    `json:"repo_url"`
+	Branch                   string    `json:"branch"`
+	ProjectType              string    `json:"project_type"`
+	BuildCommand             string    `json:"build_command"`
+	InstallCommand           *string   `json:"install_command,omitempty"`
+	StartCommand             *string   `json:"start_command,omitempty"`
+	OutputDir                string    `json:"output_dir"`
+	WorkingDirectory         string    `json:"working_directory,omitempty"`
+	BackendWorkingDirectory  string    `json:"backend_working_directory,omitempty"`
+	BackendInstallCommand    string    `json:"backend_install_command,omitempty"`
+	BackendBuildCommand      string    `json:"backend_build_command,omitempty"`
+	LocalPort                int       `json:"local_port,omitempty"`
+	EnvVars                  string    `json:"env_vars"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 type Deploy struct {

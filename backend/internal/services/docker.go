@@ -95,7 +95,7 @@ func (d *DockerService) GenerateDockerfile(framework FrameworkType, installCmd, 
 
 func (d *DockerService) dockerfileNodeExpress(installCmd, startCmd string, port int) string {
 	if installCmd == "" {
-		installCmd = "npm ci --production=false"
+		installCmd = "npm install"
 	}
 	if startCmd == "" {
 		startCmd = "npm start"
@@ -114,7 +114,7 @@ CMD ["/bin/sh", "-c", "%s"]
 
 func (d *DockerService) dockerfileNodeStatic(installCmd, buildCmd string) string {
 	if installCmd == "" {
-		installCmd = "npm ci"
+		installCmd = "npm install"
 	}
 	if buildCmd == "" {
 		buildCmd = "npm run build"
@@ -124,6 +124,13 @@ WORKDIR /app
 COPY . .
 RUN %s
 RUN %s
+
+FROM node:20-slim
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+RUN npm install -g serve
+EXPOSE 80
+CMD ["serve", "-s", "dist", "-l", "80"]
 `, installCmd, buildCmd)
 }
 
@@ -229,7 +236,6 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 		"--progress=plain",
 		"-f", dockerfilePath,
 		"-t", imageName,
-		"--memory", d.cfg.DockerMemoryLimit,
 	}
 
 	// Add env vars as build args
@@ -415,9 +421,9 @@ func IsBackendFramework(framework FrameworkType) bool {
 func GetDefaultInstallCommand(framework FrameworkType) string {
 	switch framework {
 	case FrameworkNodeExpress:
-		return "npm ci --production=false"
+		return "npm install"
 	case FrameworkNodeStatic:
-		return "npm ci"
+		return "npm install"
 	case FrameworkPythonFastAPI, FrameworkPythonDjango:
 		return "pip install --no-cache-dir -r requirements.txt"
 	case FrameworkGo:
