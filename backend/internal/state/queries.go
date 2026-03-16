@@ -56,9 +56,9 @@ func (db *DB) CreateProject(p *Project) error {
 	p.UpdatedAt = now
 
 	_, err := db.conn.Exec(
-		`INSERT INTO projects (id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.InstallCommand, p.StartCommand, p.OutputDir, p.WorkingDirectory, p.LocalPort, p.EnvVars, p.CreatedAt, p.UpdatedAt,
+		`INSERT INTO projects (id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, backend_working_directory, backend_install_command, backend_build_command, local_port, domain, deployment_target, env_vars, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.InstallCommand, p.StartCommand, p.OutputDir, p.WorkingDirectory, p.BackendWorkingDirectory, p.BackendInstallCommand, p.BackendBuildCommand, p.LocalPort, p.Domain, p.DeploymentTarget, p.EnvVars, p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
@@ -66,8 +66,8 @@ func (db *DB) CreateProject(p *Project) error {
 func (db *DB) GetProject(id string) (*Project, error) {
 	p := &Project{}
 	err := db.conn.QueryRow(
-		"SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at FROM projects WHERE id = ?", id,
-	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
+		"SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, backend_working_directory, backend_install_command, backend_build_command, local_port, domain, deployment_target, env_vars, created_at, updated_at FROM projects WHERE id = ?", id,
+	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.BackendWorkingDirectory, &p.BackendInstallCommand, &p.BackendBuildCommand, &p.LocalPort, &p.Domain, &p.DeploymentTarget, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -75,7 +75,7 @@ func (db *DB) GetProject(id string) (*Project, error) {
 }
 
 func (db *DB) ListProjects() ([]Project, error) {
-	rows, err := db.conn.Query("SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at FROM projects ORDER BY created_at DESC")
+	rows, err := db.conn.Query("SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, backend_working_directory, backend_install_command, backend_build_command, local_port, domain, deployment_target, env_vars, created_at, updated_at FROM projects ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (db *DB) ListProjects() ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.BackendWorkingDirectory, &p.BackendInstallCommand, &p.BackendBuildCommand, &p.LocalPort, &p.Domain, &p.DeploymentTarget, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, p)
@@ -95,8 +95,8 @@ func (db *DB) ListProjects() ([]Project, error) {
 func (db *DB) UpdateProject(p *Project) error {
 	p.UpdatedAt = time.Now()
 	_, err := db.conn.Exec(
-		`UPDATE projects SET name=?, repo_url=?, branch=?, project_type=?, build_command=?, install_command=?, start_command=?, output_dir=?, working_directory=?, local_port=?, env_vars=?, updated_at=? WHERE id=?`,
-		p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.InstallCommand, p.StartCommand, p.OutputDir, p.WorkingDirectory, p.LocalPort, p.EnvVars, p.UpdatedAt, p.ID,
+		`UPDATE projects SET name=?, repo_url=?, branch=?, project_type=?, build_command=?, install_command=?, start_command=?, output_dir=?, working_directory=?, backend_working_directory=?, backend_install_command=?, backend_build_command=?, local_port=?, domain=?, deployment_target=?, env_vars=?, updated_at=? WHERE id=?`,
+		p.Name, p.RepoURL, p.Branch, p.ProjectType, p.BuildCommand, p.InstallCommand, p.StartCommand, p.OutputDir, p.WorkingDirectory, p.BackendWorkingDirectory, p.BackendInstallCommand, p.BackendBuildCommand, p.LocalPort, p.Domain, p.DeploymentTarget, p.EnvVars, p.UpdatedAt, p.ID,
 	)
 	return err
 }
@@ -109,9 +109,9 @@ func (db *DB) DeleteProject(id string) error {
 func (db *DB) GetProjectByRepoAndBranch(repoURL, branch string) (*Project, error) {
 	p := &Project{}
 	err := db.conn.QueryRow(
-		"SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, local_port, env_vars, created_at, updated_at FROM projects WHERE repo_url = ? AND branch = ?",
+		"SELECT id, name, repo_url, branch, project_type, build_command, install_command, start_command, output_dir, working_directory, backend_working_directory, backend_install_command, backend_build_command, local_port, domain, deployment_target, env_vars, created_at, updated_at FROM projects WHERE repo_url = ? AND branch = ?",
 		repoURL, branch,
-	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.LocalPort, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.ProjectType, &p.BuildCommand, &p.InstallCommand, &p.StartCommand, &p.OutputDir, &p.WorkingDirectory, &p.BackendWorkingDirectory, &p.BackendInstallCommand, &p.BackendBuildCommand, &p.LocalPort, &p.Domain, &p.DeploymentTarget, &p.EnvVars, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -261,6 +261,32 @@ func (db *DB) UpdateNginxSite(s *NginxSite) error {
 func (db *DB) DeleteNginxSite(id string) error {
 	_, err := db.conn.Exec("DELETE FROM nginx_sites WHERE id = ?", id)
 	return err
+}
+
+func (db *DB) GetNginxSiteByProjectID(projectID string) (*NginxSite, error) {
+	s := &NginxSite{}
+	var isActive int
+	err := db.conn.QueryRow(
+		"SELECT id, project_id, domain, config_path, is_active, created_at FROM nginx_sites WHERE project_id = ? ORDER BY created_at DESC LIMIT 1", projectID,
+	).Scan(&s.ID, &s.ProjectID, &s.Domain, &s.ConfigPath, &isActive, &s.CreatedAt)
+	s.IsActive = isActive == 1
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return s, err
+}
+
+func (db *DB) GetNginxSiteByDomain(domain string) (*NginxSite, error) {
+	s := &NginxSite{}
+	var isActive int
+	err := db.conn.QueryRow(
+		"SELECT id, project_id, domain, config_path, is_active, created_at FROM nginx_sites WHERE domain = ?", domain,
+	).Scan(&s.ID, &s.ProjectID, &s.Domain, &s.ConfigPath, &isActive, &s.CreatedAt)
+	s.IsActive = isActive == 1
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return s, err
 }
 
 // --- Tunnel Config ---

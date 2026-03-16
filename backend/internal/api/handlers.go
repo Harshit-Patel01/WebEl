@@ -662,8 +662,9 @@ func (h *tunnelHandlers) adoptTunnel(w http.ResponseWriter, r *http.Request) {
 // --- Project/Deploy handlers ---
 
 type deployHandlers struct {
-	service *services.DeployService
-	db      *state.DB
+	service        *services.DeployService
+	db             *state.DB
+	cleanupService *services.CleanupService
 }
 
 func (h *deployHandlers) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -763,10 +764,13 @@ func (h *deployHandlers) updateProject(w http.ResponseWriter, r *http.Request) {
 
 func (h *deployHandlers) deleteProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.db.DeleteProject(id); err != nil {
+
+	// Use cleanup service for comprehensive deletion
+	if err := h.cleanupService.DeleteProject(r.Context(), id); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	respondOK(w, map[string]string{"status": "deleted"})
 }
 

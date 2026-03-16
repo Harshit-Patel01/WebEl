@@ -169,6 +169,21 @@ func (n *NginxService) Reload(ctx context.Context) error {
 	return nil
 }
 
+func (n *NginxService) DeleteSite(siteName string) error {
+	availablePath := filepath.Join(n.cfg.SitesAvailable, siteName)
+	enabledPath := filepath.Join(n.cfg.SitesEnabled, siteName)
+
+	// Remove symlink
+	os.Remove(enabledPath)
+
+	// Remove config file
+	os.Remove(availablePath)
+
+	// Reload nginx to apply changes
+	ctx := context.Background()
+	return n.Reload(ctx)
+}
+
 func (n *NginxService) ValidateUpstream(ctx context.Context, port int) (bool, error) {
 	result, err := n.runner.Run(ctx, exec.RunOpts{
 		JobType: "port_check",

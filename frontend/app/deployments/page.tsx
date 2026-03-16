@@ -16,6 +16,8 @@ type Project = {
   branch: string
   project_type: string
   working_directory?: string
+  domain?: string
+  deployment_target?: string
   created_at: string
   updated_at: string
 }
@@ -563,6 +565,14 @@ export default function DeploymentsPage() {
                             <p className="flex items-center gap-1">
                               <Activity size={10} className="text-emerald-400" />
                               <span className="text-emerald-400">Service Running</span>
+                            </p>
+                          )}
+                          {project.domain && (
+                            <p className="flex items-center gap-1">
+                              <Globe size={10} className="text-accent-lime" />
+                              <a href={`https://${project.domain}`} target="_blank" rel="noopener noreferrer" className="text-accent-lime hover:underline">
+                                {project.domain}
+                              </a>
                             </p>
                           )}
                         </div>
