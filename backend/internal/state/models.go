@@ -23,6 +23,8 @@ type Project struct {
 	BackendInstallCommand    string    `json:"backend_install_command,omitempty"`
 	BackendBuildCommand      string    `json:"backend_build_command,omitempty"`
 	LocalPort                int       `json:"local_port,omitempty"`
+	Domain                   string    `json:"domain,omitempty"`
+	DeploymentTarget         string    `json:"deployment_target,omitempty"`
 	EnvVars                  string    `json:"env_vars"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`

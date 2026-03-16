@@ -196,6 +196,8 @@ export default function DeployPage() {
           backend_install_command: projectType === 'full_stack' ? backendInstallCmd : '',
           backend_build_command: projectType === 'full_stack' ? backendBuildCmd : '',
           local_port: localPort ? parseInt(localPort) : (backendPort ? parseInt(backendPort) : 0),
+          domain: domain || subdomain ? (subdomain ? `${subdomain}.${domain}` : domain) : '',
+          deployment_target: deploymentTarget,
           env_vars: JSON.stringify(envObj),
         }),
       })

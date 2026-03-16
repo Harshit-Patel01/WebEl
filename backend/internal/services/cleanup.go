@@ -338,3 +338,107 @@ func (c *CleanupService) GetOrphanReport(ctx context.Context) *CleanupReport {
 
 	return report
 }
+
+// DeleteProject performs comprehensive cleanup when deleting a project
+func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) error {
+	c.logger.Info("deleting project with full cleanup", zap.String("projectId", projectID))
+
+	project, err := c.db.GetProject(projectID)
+	if err != nil || project == nil {
+		return fmt.Errorf("project not found: %w", err)
+	}
+
+	// 1. Stop and remove containers (but keep images for reuse)
+	containers, _ := c.db.ListContainersByProject(projectID)
+	for _, container := range containers {
+		c.logger.Info("stopping and removing container",
+			zap.String("projectId", projectID),
+			zap.String("containerId", container.ContainerID),
+		)
+
+		// Stop container
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "docker_stop",
+			Command: c.cfg.DockerBinary,
+			Args:    []string{"stop", container.ContainerID},
+			Timeout: 30 * time.Second,
+		})
+
+		// Remove container from Docker
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "docker_rm",
+			Command: c.cfg.DockerBinary,
+			Args:    []string{"rm", "-f", container.ContainerID},
+			Timeout: 15 * time.Second,
+		})
+
+		// Remove from database
+		c.db.DeleteContainer(container.ID)
+	}
+
+	// 2. Delete cloned repository from /tmp
+	repoPath := filepath.Join("/tmp", projectID)
+	if _, err := os.Stat(repoPath); err == nil {
+		c.logger.Info("removing cloned repository", zap.String("path", repoPath))
+		os.RemoveAll(repoPath)
+	}
+
+	// 3. Delete build artifacts from output directory
+	if project.Name != "" {
+		outputPath := filepath.Join(c.cfg.OutputRoot, "sites", sanitizeFolderName(project.Name))
+		if _, err := os.Stat(outputPath); err == nil {
+			c.logger.Info("removing build artifacts", zap.String("path", outputPath))
+			os.RemoveAll(outputPath)
+		}
+	}
+
+	// 4. Remove nginx site config if domain is set
+	if project.Domain != "" {
+		c.logger.Info("removing nginx site config", zap.String("domain", project.Domain))
+
+		// Delete nginx config files
+		sitesAvailable := "/etc/nginx/sites-available"
+		sitesEnabled := "/etc/nginx/sites-enabled"
+
+		availablePath := filepath.Join(sitesAvailable, project.Domain)
+		enabledPath := filepath.Join(sitesEnabled, project.Domain)
+
+		os.Remove(enabledPath)
+		os.Remove(availablePath)
+
+		// Reload nginx
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "nginx_reload",
+			Command: "/usr/bin/sudo",
+			Args:    []string{"/usr/bin/systemctl", "reload", "nginx"},
+			Timeout: 10 * time.Second,
+		})
+
+		// Remove nginx_sites record from database
+		site, _ := c.db.GetNginxSiteByProjectID(projectID)
+		if site != nil {
+			c.db.DeleteNginxSite(site.ID)
+		}
+	}
+
+	// 5. Delete all deploys and their logs
+	deploys, _ := c.db.ListDeploysByProject(projectID)
+	for _, deploy := range deploys {
+		c.db.DeleteDeployLogs(deploy.ID)
+	}
+	// Deploys will be cascade deleted when project is deleted due to foreign key
+
+	// 6. Delete environment variables
+	envVars, _ := c.db.ListEnvVariables(projectID)
+	for _, env := range envVars {
+		c.db.DeleteEnvVariable(env.ID)
+	}
+
+	// 7. Delete project from database (this will cascade delete deploys)
+	if err := c.db.DeleteProject(projectID); err != nil {
+		return fmt.Errorf("failed to delete project from database: %w", err)
+	}
+
+	c.logger.Info("project deleted successfully", zap.String("projectId", projectID))
+	return nil
+}

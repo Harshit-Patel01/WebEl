@@ -71,7 +71,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	authH := &authHandlers{auth: a}
 	wifiH := &wifiHandlers{service: wifiSvc}
 	tunnelH := &tunnelHandlers{service: tunnelSvc}
-	deployH := &deployHandlers{service: deploySvc, db: db}
+	deployH := &deployHandlers{service: deploySvc, db: db, cleanupService: cleanupSvc}
 	nginxH := &nginxHandlers{service: nginxSvc, db: db}
 	systemH := &systemHandlers{service: systemSvc, db: db}
 	servicesH := &servicesHandlers{system: systemSvc, runner: runner}
