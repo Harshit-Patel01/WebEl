@@ -51,7 +51,7 @@ func (db *DB) runMigrations() error {
 	}
 
 	// Run migrations sequentially
-	migrations := []string{migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013}
+	migrations := []string{migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015}
 
 	for i, m := range migrations {
 		version := i + 1
@@ -325,4 +325,21 @@ CREATE TABLE IF NOT EXISTS ap_config (
 INSERT OR IGNORE INTO ap_config (id, ssid, password, enabled, channel) VALUES (1, 'webel', 'webel123', 1, 6);
 
 INSERT OR REPLACE INTO schema_version (version) VALUES (13);
+`
+
+const migration014 = `
+-- Add Full Stack deployment support columns
+ALTER TABLE projects ADD COLUMN backend_working_directory TEXT DEFAULT '';
+ALTER TABLE projects ADD COLUMN backend_install_command TEXT DEFAULT '';
+ALTER TABLE projects ADD COLUMN backend_build_command TEXT DEFAULT '';
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (14);
+`
+
+const migration015 = `
+-- Add domain tracking and deployment target
+ALTER TABLE projects ADD COLUMN domain TEXT DEFAULT '';
+ALTER TABLE projects ADD COLUMN deployment_target TEXT DEFAULT 'local';
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (15);
 `
