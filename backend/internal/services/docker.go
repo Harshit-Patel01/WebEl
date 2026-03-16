@@ -235,7 +235,6 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 	imageName := fmt.Sprintf("opendeploy/%s:latest", projectID)
 	buildArgs := []string{
 		"build",
-		"--no-cache",
 		"--progress=plain",
 		"-f", dockerfilePath,
 		"-t", imageName,
