@@ -559,6 +559,12 @@ export default function DeploymentsPage() {
                               <span className="text-accent-lime">{latestDeploy.output_path}</span>
                             </p>
                           )}
+                          {container?.status === 'running' && (
+                            <p className="flex items-center gap-1">
+                              <Activity size={10} className="text-emerald-400" />
+                              <span className="text-emerald-400">Service Running</span>
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -567,7 +573,7 @@ export default function DeploymentsPage() {
                           <button
                             onClick={() => handleOpenTunnelModal(project.id)}
                             className={`px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1 ${!hasTunnelSetup ? 'opacity-50' : ''}`}
-                            title={!hasTunnelSetup ? 'Set up Cloudflare Tunnel first' : 'Deploy via Cloudflare Tunnel'}
+                            title={!hasTunnelSetup ? 'Set up Cloudflare Tunnel first' : 'Deploy via Cloudflare Tunnel (routes through nginx)'}
                           >
                             <Cloud size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Tunnel</span>
                           </button>
@@ -575,25 +581,28 @@ export default function DeploymentsPage() {
                         <button
                           onClick={() => { setSelectedProjectId(project.id); setShowEnvModal(true); loadEnvVars(project.id) }}
                           className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          title="Manage environment variables"
                         >
                           <Key size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Env</span>
                         </button>
                         <button
                           onClick={() => handleRebuild(project.id)}
                           className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-primary text-text-secondary font-mono text-[9px] sm:text-[10px] font-bold hover:text-accent-lime hover:border-accent-lime border border-border-dark transition-colors flex items-center gap-1"
+                          title="Rebuild from scratch"
                         >
                           <RefreshCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Rebuild</span>
                         </button>
                         <button
                           onClick={() => handleRedeploy(project.id)}
                           className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold hover:bg-accent-lime-muted transition-colors"
+                          title="Redeploy latest changes"
                         >
                           Deploy
                         </button>
                         <button
                           onClick={() => handleDeleteProject(project.id)}
                           className="px-2 sm:px-3 py-1 sm:py-1.5 border border-border-dark text-text-secondary hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
-                          title="Delete project"
+                          title="Delete project and all deployments"
                         >
                           <Trash2 size={11} className="flex-shrink-0" />
                         </button>
@@ -601,7 +610,7 @@ export default function DeploymentsPage() {
                     </div>
                   </div>
 
-                  {/* Container Status (for backends) */}
+                  {/* Container Status (for backends and full stack) */}
                   {container && (
                     <div className="px-6 py-4 bg-bg-primary/50 border-b border-border-dark">
                       <div className="flex items-center justify-between mb-3">
@@ -672,6 +681,7 @@ export default function DeploymentsPage() {
                                 <span className="text-text-secondary mx-1">→</span>
                                 <span className="text-cyan-400">Container {mapping.container}</span>
                               </span>
+                              <span className="text-text-secondary text-[9px]">(nginx proxies to host port)</span>
                             </div>
                           )
                         } catch {

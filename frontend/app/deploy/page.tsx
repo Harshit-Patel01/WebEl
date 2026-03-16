@@ -12,11 +12,11 @@ import { useWebSocket } from '@/contexts/WebSocketContext'
 import { apiKeyStorage } from '@/utils/apiKey'
 
 type DeployState = 'form' | 'building' | 'success' | 'failed'
-type ProjectType = 'frontend' | 'backend'
+type ProjectType = 'web_service' | 'app_service' | 'full_stack'
 
 export default function DeployPage() {
   const [state, setState] = useState<DeployState>('form')
-  const [projectType, setProjectType] = useState<ProjectType>('frontend')
+  const [projectType, setProjectType] = useState<ProjectType>('web_service')
   const [projectName, setProjectName] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
   const [branch, setBranch] = useState('main')
@@ -26,6 +26,13 @@ export default function DeployPage() {
   const [localPort, setLocalPort] = useState('')
   const [outputDir, setOutputDir] = useState('')
   const [workingDir, setWorkingDir] = useState('')
+  const [frontendWorkingDir, setFrontendWorkingDir] = useState('')
+  const [backendWorkingDir, setBackendWorkingDir] = useState('')
+  const [frontendBuildCmd, setFrontendBuildCmd] = useState('build')
+  const [frontendOutputDir, setFrontendOutputDir] = useState('')
+  const [frontendInstallCmd, setFrontendInstallCmd] = useState('')
+  const [backendInstallCmd, setBackendInstallCmd] = useState('')
+  const [backendBuildCmd, setBackendBuildCmd] = useState('')
   const [envVars, setEnvVars] = useState<{ key: string; value: string; is_secret: boolean; visible: boolean }[]>([])
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [bulkContent, setBulkContent] = useState('')
@@ -115,14 +122,19 @@ export default function DeployPage() {
 
   // Update defaults when project type changes
   useEffect(() => {
-    if (projectType === 'backend') {
+    if (projectType === 'app_service') {
       setBuildCmd('')
       setOutputDir('')
       setBackendPort('8000')
-    } else {
+    } else if (projectType === 'web_service') {
       setBuildCmd('build')
       setOutputDir('')
       setBackendPort('')
+    } else if (projectType === 'full_stack') {
+      setFrontendBuildCmd('build')
+      setFrontendOutputDir('')
+      setBuildCmd('')
+      setBackendPort('8000')
     }
   }, [projectType])
 
@@ -174,13 +186,16 @@ export default function DeployPage() {
           name: projectName,
           repo_url: repoUrl,
           branch,
-          project_type: projectType === 'backend' ? 'python' : 'node',
-          build_command: buildCmd,
-          install_command: installCmd,
+          project_type: projectType === 'app_service' ? 'python' : projectType === 'full_stack' ? 'fullstack' : 'node',
+          build_command: projectType === 'full_stack' ? frontendBuildCmd : buildCmd,
+          install_command: projectType === 'full_stack' ? frontendInstallCmd : installCmd,
           start_command: startCmd,
-          output_dir: outputDir,
-          working_directory: workingDir,
-          local_port: localPort ? parseInt(localPort) : 0,
+          output_dir: projectType === 'full_stack' ? frontendOutputDir : outputDir,
+          working_directory: projectType === 'full_stack' ? frontendWorkingDir : workingDir,
+          backend_working_directory: projectType === 'full_stack' ? backendWorkingDir : '',
+          backend_install_command: projectType === 'full_stack' ? backendInstallCmd : '',
+          backend_build_command: projectType === 'full_stack' ? backendBuildCmd : '',
+          local_port: localPort ? parseInt(localPort) : (backendPort ? parseInt(backendPort) : 0),
           env_vars: JSON.stringify(envObj),
         }),
       })
@@ -262,11 +277,9 @@ export default function DeployPage() {
           if (apiKey) {
             const fullDomain = subdomain ? `${subdomain}.${domain}` : domain
 
-            // Determine port based on project type
-            let port = 80
-            if (projectType === 'backend' && backendPort) {
-              port = parseInt(backendPort, 10)
-            }
+            // For Cloudflare Tunnel, always route to nginx (port 80)
+            // Nginx will handle the proxy to Docker containers
+            const tunnelPort = 80
 
             await fetch('/api/v1/tunnel/routes', {
               method: 'POST',
@@ -279,7 +292,7 @@ export default function DeployPage() {
                 hostname: fullDomain,
                 zone_id: selectedZoneId,
                 local_scheme: 'http',
-                local_port: port
+                local_port: tunnelPort
               })
             })
           }
@@ -461,11 +474,12 @@ export default function DeployPage() {
           </motion.div>
         )}
 
-        {/* Form + Build state */}
-        {(state === 'form' || state === 'building') && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Form state - Full screen */}
+        {state === 'form' && !currentDeployId && (
+          <div className="mx-auto px-4 px-md-0">
+            <div className="bg-bg-secondary border border-border-dark overflow-hidden">
             {/* Form */}
-            <div className="bg-bg-secondary  border border-border-dark overflow-hidden xl:h-fit xl:sticky xl:top-6">
+            <div>
               {/* Header */}
               <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30">
                 <h2 className="font-serif text-h2 mb-2">Deploy from GitHub</h2>
@@ -491,7 +505,7 @@ export default function DeployPage() {
                     </h3>
                   </div>
                   <div className="flex gap-2 bg-bg-primary  p-1.5">
-                    {(['frontend', 'backend'] as ProjectType[]).map(type => (
+                    {(['web_service', 'app_service', 'full_stack'] as ProjectType[]).map(type => (
                       <button
                         key={type}
                         onClick={() => setProjectType(type)}
@@ -502,14 +516,16 @@ export default function DeployPage() {
                             : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
                         }`}
                       >
-                        {type}
+                        {type === 'web_service' ? 'Web Service' : type === 'app_service' ? 'App Service' : 'Full Stack'}
                       </button>
                     ))}
                   </div>
                   <p className="mt-2 font-mono text-[10px] text-text-secondary">
-                    {projectType === 'frontend'
-                      ? 'Static sites, React, Vue, Next.js, etc. Will be served via nginx.'
-                      : 'Node.js, Python, Go backends. Will run in Docker containers with port mapping.'}
+                    {projectType === 'web_service'
+                      ? 'Static sites, React, Vue, Next.js, etc. Served via nginx or containerized with serve.'
+                      : projectType === 'app_service'
+                      ? 'Node.js, Python, Go backends. Run in Docker containers with port mapping.'
+                      : 'Combined frontend + backend deployment with nginx proxy configuration.'}
                   </p>
                 </div>
 
@@ -521,7 +537,7 @@ export default function DeployPage() {
                       Repository
                     </h3>
                   </div>
-                  <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block font-mono text-[11px] text-text-secondary mb-2">
                         Project Name <span className="text-red-400">*</span>
@@ -536,22 +552,6 @@ export default function DeployPage() {
                       <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
                         Auto-fills from repository URL
                       </p>
-                    </div>
-
-                    <div>
-                      <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                        Repository URL <span className="text-red-400">*</span>
-                      </label>
-                      <div className="relative">
-                        <Github size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                        <input
-                          value={repoUrl}
-                          onChange={e => setRepoUrl(e.target.value)}
-                          disabled={deploying}
-                          className="w-full pl-10 pr-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                          placeholder="https://github.com/user/repo"
-                        />
-                      </div>
                     </div>
 
                     <div>
@@ -574,21 +574,72 @@ export default function DeployPage() {
                       </datalist>
                     </div>
 
-                    <div>
+                    <div className="md:col-span-2">
                       <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                        Working Directory
+                        Repository URL <span className="text-red-400">*</span>
                       </label>
-                      <input
-                        value={workingDir}
-                        onChange={e => setWorkingDir(e.target.value)}
-                        disabled={deploying}
-                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                        placeholder="(root)"
-                      />
-                      <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                        Subfolder containing your project (e.g., &quot;frontend&quot;, &quot;app&quot;)
-                      </p>
+                      <div className="relative">
+                        <Github size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                        <input
+                          value={repoUrl}
+                          onChange={e => setRepoUrl(e.target.value)}
+                          disabled={deploying}
+                          className="w-full pl-10 pr-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                          placeholder="https://github.com/user/repo"
+                        />
+                      </div>
                     </div>
+
+                    {projectType !== 'full_stack' ? (
+                      <div className="md:col-span-2">
+                        <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                          Working Directory
+                        </label>
+                        <input
+                          value={workingDir}
+                          onChange={e => setWorkingDir(e.target.value)}
+                          disabled={deploying}
+                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                          placeholder="(root)"
+                        />
+                        <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                          Subfolder containing your project (e.g., &quot;frontend&quot;, &quot;app&quot;)
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Frontend Working Directory
+                          </label>
+                          <input
+                            value={frontendWorkingDir}
+                            onChange={e => setFrontendWorkingDir(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="frontend"
+                          />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Subfolder containing frontend code
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Backend Working Directory
+                          </label>
+                          <input
+                            value={backendWorkingDir}
+                            onChange={e => setBackendWorkingDir(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="backend"
+                          />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Subfolder containing backend code
+                          </p>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -600,8 +651,8 @@ export default function DeployPage() {
                       Build Settings
                     </h3>
                   </div>
-                  <div className="space-y-4">
-                    {projectType === 'frontend' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {projectType === 'web_service' && (
                       <>
                         <div>
                           <label className="block font-mono text-[11px] text-text-secondary mb-2">
@@ -636,24 +687,100 @@ export default function DeployPage() {
                       </>
                     )}
 
-                    <div>
-                      <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                        Install Command (Optional)
-                      </label>
-                      <input
-                        value={installCmd}
-                        onChange={e => setInstallCmd(e.target.value)}
-                        disabled={deploying}
-                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                        placeholder="npm install"
-                      />
-                    </div>
-
-                    {projectType === 'backend' && (
+                    {projectType === 'full_stack' && (
                       <>
                         <div>
                           <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                            Start Command
+                            Frontend Build Command
+                          </label>
+                          <input
+                            value={frontendBuildCmd}
+                            onChange={e => setFrontendBuildCmd(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="build"
+                          />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Frontend build script (e.g., "build" for npm run build)
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Frontend Output Directory
+                          </label>
+                          <input
+                            value={frontendOutputDir}
+                            onChange={e => setFrontendOutputDir(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="Auto-detect (dist, build, out)"
+                          />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Leave blank to auto-detect
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Frontend Install Command
+                          </label>
+                          <input
+                            value={frontendInstallCmd}
+                            onChange={e => setFrontendInstallCmd(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="npm install"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Backend Build Command
+                          </label>
+                          <input
+                            value={backendBuildCmd}
+                            onChange={e => setBackendBuildCmd(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="(optional - for custom build steps)"
+                          />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Optional backend build script
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Backend Install Command
+                          </label>
+                          <input
+                            value={backendInstallCmd}
+                            onChange={e => setBackendInstallCmd(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="pip install -r requirements.txt"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {projectType !== 'full_stack' && (
+                      <div className={projectType === 'web_service' ? 'md:col-span-2' : ''}>
+                        <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                          Install Command (Optional)
+                        </label>
+                        <input
+                          value={installCmd}
+                          onChange={e => setInstallCmd(e.target.value)}
+                          disabled={deploying}
+                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                          placeholder="npm install"
+                        />
+                      </div>
+                    )}
+
+                    {(projectType === 'app_service' || projectType === 'full_stack') && (
+                      <>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            {projectType === 'full_stack' ? 'Backend Start Command' : 'Start Command'}
                           </label>
                           <input
                             value={startCmd}
@@ -668,7 +795,7 @@ export default function DeployPage() {
                         </div>
                         <div>
                           <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                            Backend Port
+                            {projectType === 'full_stack' ? 'Backend Port' : 'Service Port'}
                           </label>
                           <input
                             value={backendPort}
@@ -679,7 +806,7 @@ export default function DeployPage() {
                             placeholder="8000"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Port your backend app is running on
+                            Port your {projectType === 'full_stack' ? 'backend' : 'service'} app is running on
                           </p>
                         </div>
                       </>
@@ -802,7 +929,7 @@ export default function DeployPage() {
                         </div>
                       )}
 
-                      {deploymentTarget === 'internet' && selectedZoneId && projectType === 'backend' && (
+                      {deploymentTarget === 'internet' && selectedZoneId && (projectType === 'app_service' || projectType === 'full_stack') && (
                         <div className="mt-4 p-4 bg-blue-900/20 border border-blue-800/50 ">
                           <div className="flex items-center gap-2 mb-3">
                             <Globe size={14} className="text-blue-400" />
@@ -884,13 +1011,13 @@ export default function DeployPage() {
                       <p className="mt-2 font-mono text-[10px] text-text-secondary">
                         {deploymentTarget === 'local' && (
                           subdomain ? (
-                            <>Nginx will route {subdomain}.{domain} (/ to frontend{projectType === 'backend' && backendPort ? `, /api to backend on port ${backendPort}` : ''})</>
+                            <>Nginx will route {subdomain}.{domain} (/ to frontend{(projectType === 'app_service' || projectType === 'full_stack') && backendPort ? `, /api to backend on port ${backendPort}` : ''})</>
                           ) : (
-                            <>Nginx will route / to frontend{projectType === 'backend' && backendPort ? ` and /api to backend on port ${backendPort}` : ''}</>
+                            <>Nginx will route / to frontend{(projectType === 'app_service' || projectType === 'full_stack') && backendPort ? ` and /api to backend on port ${backendPort}` : ''}</>
                           )
                         )}
                         {deploymentTarget === 'internet' && (
-                          <>Your app will be accessible at https://{subdomain ? `${subdomain}.${domain}` : domain} via Cloudflare Tunnel (port {projectType === 'frontend' ? '80' : backendPort || '8000'})</>
+                          <>Your app will be accessible at https://{subdomain ? `${subdomain}.${domain}` : domain} via Cloudflare Tunnel (routed through nginx on port 80)</>
                         )}
                       </p>
                     </div>
@@ -1067,51 +1194,41 @@ export default function DeployPage() {
                 </div>
               </div>
             </div>
+            </div>
+          </div>
+        )}
 
-            {/* Build Log Panel - Right Column on Large Screens */}
-            {state === 'building' && currentDeployId && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-bg-secondary  border border-border-dark overflow-hidden xl:h-[calc(100vh-8rem)] xl:sticky xl:top-6 flex flex-col"
-              >
-                <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30 flex-shrink-0">
-                  <div className="flex items-center gap-2">
-                    <Terminal size={16} className="text-accent-lime" />
-                    <h3 className="font-mono text-[12px] uppercase tracking-wider text-text-primary font-bold">
-                      Build Output
-                    </h3>
-                  </div>
+        {/* Building state - Show build logs full screen */}
+        {state === 'building' && currentDeployId && (
+          <div className="bg-bg-secondary border border-border-dark overflow-hidden">
+            <div className="px-8 py-6 border-b border-border-dark bg-bg-primary/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Terminal size={16} className="text-accent-lime" />
+                  <h3 className="font-mono text-[12px] uppercase tracking-wider text-text-primary font-bold">
+                    Build Output
+                  </h3>
                 </div>
-                <div className="p-6 flex-1 flex flex-col overflow-hidden">
-                  <div className="mb-4 flex-shrink-0">
-                    <BuildProgress currentPhase={buildPhase} />
-                  </div>
-                  <div className="flex-1 overflow-hidden">
-                    <DeployLogStream
-                      deployId={currentDeployId}
-                      onComplete={handleDeployComplete}
-                      maxHeight="100%"
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Placeholder for right column when not building */}
-            {state === 'form' && !currentDeployId && (
-              <div className="hidden xl:flex bg-bg-secondary  border border-border-dark overflow-hidden items-center justify-center p-12">
-                <div className="text-center">
-                  <Terminal size={48} className="text-text-secondary/30 mx-auto mb-4" />
-                  <p className="font-mono text-small text-text-secondary">
-                    Build logs will appear here
-                  </p>
-                  <p className="font-mono text-[10px] text-text-secondary/70 mt-2">
-                    Configure your project and click Deploy
-                  </p>
-                </div>
+                <button
+                  onClick={resetForm}
+                  className="text-text-secondary hover:text-text-primary text-xs"
+                >
+                  ✕ Cancel
+                </button>
               </div>
-            )}
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <BuildProgress currentPhase={buildPhase} />
+              </div>
+              <div>
+                <DeployLogStream
+                  deployId={currentDeployId}
+                  onComplete={handleDeployComplete}
+                  maxHeight="600px"
+                />
+              </div>
+            </div>
           </div>
         )}
       </motion.div>
