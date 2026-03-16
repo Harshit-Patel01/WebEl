@@ -6,11 +6,9 @@ const nextConfig = {
         unoptimized: true
     },
     typescript: {
-        // Don't type check during build - we'll do it separately
         ignoreBuildErrors: true,
     },
     eslint: {
-        // Don't run ESLint during build - we'll do it separately
         ignoreDuringBuilds: true,
     }
 }
