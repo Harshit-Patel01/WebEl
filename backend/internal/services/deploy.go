@@ -807,16 +807,19 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		logToDB("stdout", "Starting build process...")
 
 		isBackend := IsBackendFramework(framework)
-		useDocker := d.cfg.DockerEnabled && isBackend // Docker only for backends when enabled
+		useDocker := d.cfg.DockerEnabled // Use Docker for ALL deployments (frontend and backend)
 
 		logToDB("stdout", fmt.Sprintf("Deployment mode: %s (Docker: %v)", map[bool]string{true: "backend", false: "frontend"}[isBackend], useDocker))
 
 		if useDocker {
-			// Docker path for backend services only
-			logToDB("stdout", "Using Docker for backend containerization...")
-			port := GetDefaultPort(framework)
-			if project.LocalPort > 0 {
-				port = project.LocalPort
+			// Docker path for ALL deployments (frontend and backend)
+			logToDB("stdout", "Using Docker for containerization...")
+			port := 80 // Default to port 80 for frontends
+			if isBackend {
+				port = GetDefaultPort(framework)
+				if project.LocalPort > 0 {
+					port = project.LocalPort
+				}
 			}
 
 			installCmd := ""
@@ -873,73 +876,62 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		logToDB("stdout", "Build completed successfully")
 
 		// ================================================================
-		// POST-BUILD: Copy output or start service
+		// POST-BUILD: Start container for ALL deployments
 		// ================================================================
 		var outputPath string
 
-		if isBackend {
-			d.broadcastPhase(deployID, "service", "Starting backend service...")
-			logToDB("stdout", "Starting backend service...")
+		if useDocker {
+			// Start Docker container for ALL deployments (frontend and backend)
+			d.broadcastPhase(deployID, "service", "Starting container...")
+			logToDB("stdout", "Starting Docker container...")
 
-			if useDocker {
-				// Start Docker container for backend
-				imageName := fmt.Sprintf("opendeploy/%s:latest", project.ID)
-				port := GetDefaultPort(framework)
+			imageName := fmt.Sprintf("opendeploy/%s:latest", project.ID)
+			port := 80 // Default to port 80 for frontends
+			if isBackend {
+				port = GetDefaultPort(framework)
 				if project.LocalPort > 0 {
 					port = project.LocalPort
 				}
+			}
 
-				if d.container != nil {
-					container, containerErr := d.container.StartContainer(deployCtx, project.ID, project.Name, imageName, port, envVars)
-					if containerErr != nil {
-						logToDB("stderr", fmt.Sprintf("Failed to start container: %s", containerErr.Error()))
-						d.logger.Error("failed to start container", zap.String("projectId", project.ID), zap.Error(containerErr))
-					} else {
-						logToDB("stdout", fmt.Sprintf("Container started: %s (port %d)", container.Name, port))
-						d.logger.Info("container started", zap.String("projectId", project.ID), zap.String("containerName", container.Name))
-					}
-				}
-			} else {
-				// Native backend: start as systemd service
-				startCmd := ""
-				if project.StartCommand != nil && *project.StartCommand != "" {
-					startCmd = *project.StartCommand
+			if d.container != nil {
+				container, containerErr := d.container.StartContainer(deployCtx, project.ID, project.Name, imageName, port, envVars)
+				if containerErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to start container: %s", containerErr.Error()))
+					d.logger.Error("failed to start container", zap.String("projectId", project.ID), zap.Error(containerErr))
 				} else {
-					startCmd = GetDefaultStartCommand(framework, GetDefaultPort(framework))
-				}
+					logToDB("stdout", fmt.Sprintf("Container started: %s (port %d)", container.Name, port))
+					d.logger.Info("container started", zap.String("projectId", project.ID), zap.String("containerName", container.Name))
 
-				if startCmd != "" {
-					serviceErr := d.CreateServiceForFramework(project.ID, project.Name, framework, envVars)
-					if serviceErr != nil {
-						logToDB("stderr", fmt.Sprintf("Failed to create service: %s", serviceErr.Error()))
-					} else {
-						logToDB("stdout", fmt.Sprintf("Backend service started (command: %s)", startCmd))
+					// For frontend containers, set outputPath to indicate containerized deployment
+					if !isBackend {
+						outputPath = fmt.Sprintf("containerized (port %d)", port)
 					}
+				}
+			}
+		} else if isBackend {
+			// Native backend (no Docker): start as systemd service
+			d.broadcastPhase(deployID, "service", "Starting backend service...")
+			logToDB("stdout", "Starting backend service...")
+
+			startCmd := ""
+			if project.StartCommand != nil && *project.StartCommand != "" {
+				startCmd = *project.StartCommand
+			} else {
+				startCmd = GetDefaultStartCommand(framework, GetDefaultPort(framework))
+			}
+
+			if startCmd != "" {
+				serviceErr := d.CreateServiceForFramework(project.ID, project.Name, framework, envVars)
+				if serviceErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to create service: %s", serviceErr.Error()))
+				} else {
+					logToDB("stdout", fmt.Sprintf("Backend service started (command: %s)", startCmd))
 				}
 			}
 		} else {
-			// Frontend: copy build output to nginx-servable directory
-			d.broadcastPhase(deployID, "service", "Copying frontend build to serve directory...")
-			logToDB("stdout", "Copying build output to nginx directory...")
-
-			outputPath, err = d.copyFrontendToNginx(project.ID, project.Name, workingDir, project.OutputDir)
-			if err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to copy build output: %s", err.Error()))
-				// Not a fatal error — the build still succeeded
-			} else {
-				logToDB("stdout", "")
-				logToDB("stdout", "═══════════════════════════════════════════════════════════")
-				logToDB("stdout", fmt.Sprintf("✓ Frontend files deployed to: %s", outputPath))
-				logToDB("stdout", "")
-				logToDB("stdout", "To serve this site with nginx, configure your server block:")
-				logToDB("stdout", fmt.Sprintf("  root %s;", outputPath))
-				logToDB("stdout", "  index index.html;")
-				logToDB("stdout", "")
-				logToDB("stdout", "Or use the nginx configuration page to set up a domain.")
-				logToDB("stdout", "═══════════════════════════════════════════════════════════")
-				logToDB("stdout", "")
-				d.logDirectoryListing(outputPath, deployID, logToDB)
-			}
+			// Frontend without Docker (fallback - should not happen if Docker is enabled)
+			logToDB("stdout", "Warning: Frontend deployment without Docker - this is deprecated")
 		}
 
 		// ================================================================
