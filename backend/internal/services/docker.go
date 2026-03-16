@@ -127,13 +127,16 @@ RUN %s
 
 FROM node:20-slim
 WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/build ./build 2>/dev/null || true
-COPY --from=builder /app/out ./out 2>/dev/null || true
-COPY --from=builder /app/.next ./.next 2>/dev/null || true
 RUN npm install -g serve
+COPY --from=builder /app ./source
+RUN if [ -d source/dist ]; then mv source/dist ./app; \
+    elif [ -d source/build ]; then mv source/build ./app; \
+    elif [ -d source/out ]; then mv source/out ./app; \
+    elif [ -d source/.next ]; then mv source/.next ./app; \
+    elif [ -d source/public ]; then mv source/public ./app; \
+    else mv source ./app; fi && rm -rf source
 EXPOSE 80
-CMD ["sh", "-c", "if [ -d dist ]; then serve -s dist -l 80; elif [ -d build ]; then serve -s build -l 80; elif [ -d out ]; then serve -s out -l 80; elif [ -d .next ]; then serve -s .next -l 80; else serve -s . -l 80; fi"]
+CMD ["serve", "-s", "app", "-l", "80"]
 `, installCmd, buildCmd)
 }
 
