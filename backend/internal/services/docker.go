@@ -81,6 +81,7 @@ func (d *DockerService) GenerateDockerfile(framework FrameworkType, installCmd, 
 	case FrameworkNodeExpress:
 		return d.dockerfileNodeExpress(installCmd, startCmd, port)
 	case FrameworkNodeStatic:
+		// Frontend: port is always 80 inside container, host port mapped at runtime
 		return d.dockerfileNodeStatic(installCmd, startCmd)
 	case FrameworkPythonFastAPI:
 		return d.dockerfilePythonFastAPI(installCmd, startCmd, port)
@@ -119,6 +120,8 @@ func (d *DockerService) dockerfileNodeStatic(installCmd, buildCmd string) string
 	if buildCmd == "" {
 		buildCmd = "npm run build"
 	}
+	// Frontend always serves on port 80 inside the container
+	// Host port mapping is handled at runtime via docker run -p
 	return fmt.Sprintf(`FROM node:20-slim AS builder
 WORKDIR /app
 COPY . .
@@ -201,7 +204,7 @@ CMD ["/app/server"]
 // BuildInDocker runs the project build inside a Docker container.
 // The Docker build context is the locally-cloned project directory,
 // so Dockerfiles use COPY instead of cloning the repo again.
-func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID string, framework FrameworkType, installCmd, startCmd string, port int, envVars map[string]string, workingDir, outputDir string) (*exec.ExecResult, error) {
+func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID string, framework FrameworkType, installCmd, startCmd string, port int, envVars map[string]string, workingDir, outputDir, imageTag string) (*exec.ExecResult, error) {
 	containerName := fmt.Sprintf("opendeploy-build-%s", projectID)
 
 	// Generate Dockerfile
@@ -235,7 +238,7 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 	}
 
 	// Build Docker image
-	imageName := fmt.Sprintf("opendeploy/%s:latest", projectID)
+	imageName := fmt.Sprintf("opendeploy/%s:latest", imageTag)
 	buildArgs := []string{
 		"build",
 		"--progress=plain",
@@ -270,18 +273,12 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 		return buildResult, fmt.Errorf("docker build failed")
 	}
 
-	// For static frontend builds, copy output from container
-	if framework == FrameworkNodeStatic {
-		if outputDir == "" {
-			outputDir = "dist"
-		}
-		return d.copyStaticOutput(ctx, imageName, containerName, projectID, outputDir, "", jobID)
-	}
-
-	// For backend apps, the image is ready to run as a container
+	// The image is ready to run as a container.
 	// The container will be started separately by the container service
-	d.logger.Info("backend docker image built successfully",
+	// with an available host port mapped to the container's exposed port.
+	d.logger.Info("docker image built successfully",
 		zap.String("projectId", projectID),
+		zap.String("framework", string(framework)),
 		zap.String("image", imageName),
 	)
 
