@@ -7,11 +7,13 @@ import (
 )
 
 type NginxTemplateData struct {
-	Domain       string
-	FrontendPath string
-	ProxyEnabled bool
-	ProxyPort    int
-	ProxyTarget  string
+	Domain               string
+	FrontendPath         string
+	ProxyEnabled         bool
+	ProxyPort            int
+	ProxyTarget          string
+	FrontendProxyEnabled bool
+	FrontendProxyPort    int
 }
 
 const nginxTemplate = `server {
