@@ -719,6 +719,24 @@ func (db *DB) DeleteContainersByProject(projectID string) error {
 	return err
 }
 
+func (db *DB) ListAllContainers() ([]Container, error) {
+	rows, err := db.conn.Query("SELECT id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at FROM containers ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var containers []Container
+	for rows.Next() {
+		var c Container
+		if err := rows.Scan(&c.ID, &c.ProjectID, &c.Name, &c.Image, &c.ContainerID, &c.Status, &c.PortMappings, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		containers = append(containers, c)
+	}
+	return containers, rows.Err()
+}
+
 // --- Deploy Logs ---
 
 func (db *DB) CreateDeployLog(l *DeployLog) error {
