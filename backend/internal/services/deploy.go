@@ -35,14 +35,15 @@ type CommitInfo struct {
 }
 
 type DeployService struct {
-	runner      *exec.Runner
-	db          *state.DB
-	cfg         config.DeployConfig
-	logger      *zap.Logger
-	docker      *DockerService
-	nginx       *NginxService
-	container   *ContainerService
-	broadcaster exec.Broadcaster
+	runner        *exec.Runner
+	db            *state.DB
+	cfg           config.DeployConfig
+	logger        *zap.Logger
+	docker        *DockerService
+	nginx         *NginxService
+	container     *ContainerService
+	broadcaster   exec.Broadcaster
+	portAllocator *PortAllocator
 }
 
 // DeployOptions contains optional runtime configuration for a deployment
@@ -56,13 +57,15 @@ type DeployOptions struct {
 func NewDeployService(runner *exec.Runner, db *state.DB, cfg config.DeployConfig, logger *zap.Logger) *DeployService {
 	docker := NewDockerService(runner, cfg, logger)
 	container := NewContainerService(runner, db, cfg, logger)
+	portAllocator := NewPortAllocator(db, cfg.PortPoolStart, cfg.PortPoolEnd)
 	return &DeployService{
-		runner:    runner,
-		db:        db,
-		cfg:       cfg,
-		logger:    logger,
-		docker:    docker,
-		container: container,
+		runner:        runner,
+		db:            db,
+		cfg:           cfg,
+		logger:        logger,
+		docker:        docker,
+		container:     container,
+		portAllocator: portAllocator,
 	}
 }
 
@@ -677,7 +680,18 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// Build backend in Docker
 			port := project.LocalPort
 			if port == 0 {
-				port = GetDefaultPort(backendFramework)
+				// Allocate a unique port from the pool
+				allocatedPort, portErr := d.portAllocator.AllocatePort(project.ID)
+				if portErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to allocate port: %s", portErr.Error()))
+					d.failDeploy(deploy, portErr.Error())
+					return
+				}
+				port = allocatedPort
+				// Update project with allocated port
+				project.LocalPort = port
+				d.db.UpdateProject(project)
+				logToDB("stdout", fmt.Sprintf("Allocated port %d for backend", port))
 			}
 
 			backendInstallCmd := project.BackendInstallCommand
@@ -816,9 +830,35 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			logToDB("stdout", "Using Docker for containerization...")
 			port := 80 // Default to port 80 for frontends
 			if isBackend {
-				port = GetDefaultPort(framework)
-				if project.LocalPort > 0 {
-					port = project.LocalPort
+				port = project.LocalPort
+				if port == 0 {
+					// Allocate a unique port from the pool for backend
+					allocatedPort, portErr := d.portAllocator.AllocatePort(project.ID)
+					if portErr != nil {
+						logToDB("stderr", fmt.Sprintf("Failed to allocate port: %s", portErr.Error()))
+						d.failDeploy(deploy, portErr.Error())
+						return
+					}
+					port = allocatedPort
+					// Update project with allocated port
+					project.LocalPort = port
+					d.db.UpdateProject(project)
+					logToDB("stdout", fmt.Sprintf("Allocated port %d for backend", port))
+				}
+			} else {
+				// For frontend containers, also allocate unique port instead of using 80
+				port = project.LocalPort
+				if port == 0 {
+					allocatedPort, portErr := d.portAllocator.AllocatePort(project.ID)
+					if portErr != nil {
+						logToDB("stderr", fmt.Sprintf("Failed to allocate port: %s", portErr.Error()))
+						d.failDeploy(deploy, portErr.Error())
+						return
+					}
+					port = allocatedPort
+					project.LocalPort = port
+					d.db.UpdateProject(project)
+					logToDB("stdout", fmt.Sprintf("Allocated port %d for frontend", port))
 				}
 			}
 
@@ -886,11 +926,19 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			logToDB("stdout", "Starting Docker container...")
 
 			imageName := fmt.Sprintf("opendeploy/%s:latest", project.ID)
-			port := 80 // Default to port 80 for frontends
-			if isBackend {
-				port = GetDefaultPort(framework)
-				if project.LocalPort > 0 {
-					port = project.LocalPort
+			port := project.LocalPort // Use the allocated port from earlier
+			if port == 0 {
+				// Fallback: allocate port if not already set
+				allocatedPort, portErr := d.portAllocator.AllocatePort(project.ID)
+				if portErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to allocate port: %s", portErr.Error()))
+					d.logger.Error("failed to allocate port", zap.String("projectId", project.ID), zap.Error(portErr))
+					port = 80 // Fallback to 80
+				} else {
+					port = allocatedPort
+					project.LocalPort = port
+					d.db.UpdateProject(project)
+					logToDB("stdout", fmt.Sprintf("Allocated port %d", port))
 				}
 			}
 

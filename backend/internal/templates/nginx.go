@@ -59,7 +59,10 @@ const nginxTemplate = `server {
     }
 
     # Backend - reverse proxy
+    # Strip /api/ prefix so backend receives requests at root paths
+    # Example: /api/users -> backend receives /users
     location /api/ {
+        rewrite ^/api/(.*) /$1 break;
         proxy_pass http://{{$proxyTarget}}:{{.ProxyPort}};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;

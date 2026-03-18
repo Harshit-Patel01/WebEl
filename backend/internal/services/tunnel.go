@@ -485,6 +485,10 @@ func (t *TunnelService) writeConfig(tunnelID, domain string) error {
 			configBuilder.WriteString(fmt.Sprintf("    path: %s\n", route.PathPrefix))
 		}
 		configBuilder.WriteString(fmt.Sprintf("    service: %s://localhost:%d\n", route.LocalScheme, route.LocalPort))
+		// Add httpHostHeader to ensure correct Host header is sent to nginx
+		// This fixes virtual host routing when multiple sites are on port 80
+		configBuilder.WriteString("    originRequest:\n")
+		configBuilder.WriteString(fmt.Sprintf("      httpHostHeader: %s\n", route.Hostname))
 	}
 
 	// Always add catch-all rule at the end

@@ -131,10 +131,10 @@ func (c *Config) applyDefaults() {
 		c.Deploy.DockerBinary = "/usr/bin/docker"
 	}
 	if c.Deploy.DockerMemoryLimit == "" {
-		c.Deploy.DockerMemoryLimit = "512m"
+		c.Deploy.DockerMemoryLimit = "8192m"
 	}
 	if c.Deploy.DockerCPULimit == "" {
-		c.Deploy.DockerCPULimit = "1.0"
+		c.Deploy.DockerCPULimit = "5.0"
 	}
 	if c.Deploy.OutputRoot == "" {
 		c.Deploy.OutputRoot = "/var/www/opendeploy"
