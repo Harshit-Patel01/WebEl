@@ -19,11 +19,13 @@ import (
 )
 
 type NginxSiteConfig struct {
-	Domain       string `json:"domain"`
-	FrontendPath string `json:"frontend_path"`
-	ProxyEnabled bool   `json:"proxy_enabled"`
-	ProxyPort    int    `json:"proxy_port"`
-	ProxyTarget  string `json:"proxy_target"`
+	Domain               string `json:"domain"`
+	FrontendPath         string `json:"frontend_path"`
+	ProxyEnabled         bool   `json:"proxy_enabled"`
+	ProxyPort            int    `json:"proxy_port"`
+	ProxyTarget          string `json:"proxy_target"`
+	FrontendProxyEnabled bool   `json:"frontend_proxy_enabled"`
+	FrontendProxyPort    int    `json:"frontend_proxy_port"`
 }
 
 type NginxTestResult struct {
@@ -54,11 +56,13 @@ func NewNginxService(runner *exec.Runner, cfg config.NginxConfig, logger *zap.Lo
 
 func (n *NginxService) GenerateConfig(siteCfg NginxSiteConfig) string {
 	return templates.RenderNginxConfig(templates.NginxTemplateData{
-		Domain:       siteCfg.Domain,
-		FrontendPath: siteCfg.FrontendPath,
-		ProxyEnabled: siteCfg.ProxyEnabled,
-		ProxyPort:    siteCfg.ProxyPort,
-		ProxyTarget:  siteCfg.ProxyTarget,
+		Domain:               siteCfg.Domain,
+		FrontendPath:         siteCfg.FrontendPath,
+		ProxyEnabled:         siteCfg.ProxyEnabled,
+		ProxyPort:            siteCfg.ProxyPort,
+		ProxyTarget:          siteCfg.ProxyTarget,
+		FrontendProxyEnabled: siteCfg.FrontendProxyEnabled,
+		FrontendProxyPort:    siteCfg.FrontendProxyPort,
 	})
 }
 
