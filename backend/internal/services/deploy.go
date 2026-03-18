@@ -804,7 +804,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// Configure nginx for Full Stack
 			if opts != nil && opts.EnableNginx && opts.Domain != "" {
 				logToDB("stdout", "Configuring nginx for Full Stack deployment...")
-				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, "", true); err != nil {
+				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, "", true, frontendHostPort, backendHostPort); err != nil {
 					logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
 				} else {
 					logToDB("stdout", fmt.Sprintf("Nginx configured: frontend at /, backend at /api (host port %d)", backendHostPort))
@@ -939,7 +939,15 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// Configure nginx if domain is provided
 			if opts != nil && opts.EnableNginx && opts.Domain != "" {
 				logToDB("stdout", "Configuring nginx...")
-				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, "", isBackend); err != nil {
+				// Pass the host port so nginx proxies to the Docker container
+				frontendProxyPort := 0
+				var backendProxyPort int
+				if isBackend {
+					backendProxyPort = project.LocalPort
+				} else {
+					frontendProxyPort = project.LocalPort
+				}
+				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, "", isBackend, frontendProxyPort, backendProxyPort); err != nil {
 					logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
 					d.logger.Error("nginx apply failed", zap.String("deployId", deployID), zap.String("domain", opts.Domain), zap.Error(err))
 				} else {

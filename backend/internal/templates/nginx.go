@@ -26,9 +26,29 @@ const nginxTemplate = `server {
     gzip_min_length 1024;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
 
-{{- if .FrontendPath}}
+{{- if .FrontendProxyEnabled}}
 
-    # Frontend - static files
+    # Frontend - reverse proxy to Docker container
+    location / {
+        proxy_pass http://localhost:{{.FrontendProxyPort}};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            proxy_pass http://localhost:{{.FrontendProxyPort}};
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+{{- else if .FrontendPath}}
+
+    # Frontend - static files from disk
     location / {
         root {{.FrontendPath}};
         index index.html;

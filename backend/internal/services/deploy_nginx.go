@@ -10,8 +10,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// applyNginxForDeploy generates and applies nginx configuration after a successful deploy
-func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool) error {
+// applyNginxForDeploy generates and applies nginx configuration after a successful deploy.
+// frontendHostPort is the host port mapped to the frontend Docker container (0 if not applicable).
+// backendHostPort is the host port mapped to the backend Docker container (0 if not applicable).
+func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) error {
 	if d.nginx == nil {
 		return fmt.Errorf("nginx service not configured")
 	}
@@ -26,34 +28,53 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 	var proxyPort int
 
 	if isBackend {
-		// Get container info to find the host port
-		container, err := d.db.GetContainerByProjectID(project.ID)
-		if err != nil || container == nil {
-			d.logger.Warn("backend deploy but no container found",
-				zap.String("projectId", project.ID),
-				zap.Error(err),
+		if backendHostPort > 0 {
+			// Use the host port passed directly from the deploy flow
+			proxyEnabled = true
+			proxyPort = backendHostPort
+			d.logger.Info("using backend proxy",
+				zap.String("domain", domain),
+				zap.Int("proxyPort", backendHostPort),
 			)
 		} else {
-			// Parse port mappings to get host port
-			hostPort, containerPort, parseErr := parsePortMapping(container.PortMappings)
-			if parseErr == nil && hostPort > 0 {
-				proxyEnabled = true
-				proxyPort = hostPort
-				d.logger.Info("using backend proxy",
-					zap.String("domain", domain),
-					zap.Int("hostPort", hostPort),
-					zap.Int("containerPort", containerPort),
+			// Fallback: look up container from DB (for single-app backend deploys)
+			container, err := d.db.GetContainerByProjectID(project.ID)
+			if err != nil || container == nil {
+				d.logger.Warn("backend deploy but no container found",
+					zap.String("projectId", project.ID),
+					zap.Error(err),
 				)
+			} else {
+				hostPort, containerPort, parseErr := parsePortMapping(container.PortMappings)
+				if parseErr == nil && hostPort > 0 {
+					proxyEnabled = true
+					proxyPort = hostPort
+					d.logger.Info("using backend proxy",
+						zap.String("domain", domain),
+						zap.Int("hostPort", hostPort),
+						zap.Int("containerPort", containerPort),
+					)
+				}
 			}
 		}
 	}
 
+	// Determine frontend proxy settings
+	var frontendProxyEnabled bool
+	var frontendProxyPort int
+	if frontendHostPort > 0 {
+		frontendProxyEnabled = true
+		frontendProxyPort = frontendHostPort
+	}
+
 	// Generate nginx config
 	siteCfg := NginxSiteConfig{
-		Domain:       domain,
-		FrontendPath: outputPath,
-		ProxyEnabled: proxyEnabled,
-		ProxyPort:    proxyPort,
+		Domain:               domain,
+		FrontendPath:         outputPath,
+		ProxyEnabled:         proxyEnabled,
+		ProxyPort:            proxyPort,
+		FrontendProxyEnabled: frontendProxyEnabled,
+		FrontendProxyPort:    frontendProxyPort,
 	}
 	configContent := d.nginx.GenerateConfig(siteCfg)
 
@@ -81,6 +102,8 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		zap.String("outputPath", outputPath),
 		zap.Bool("proxyEnabled", proxyEnabled),
 		zap.Int("proxyPort", proxyPort),
+		zap.Bool("frontendProxyEnabled", frontendProxyEnabled),
+		zap.Int("frontendProxyPort", frontendProxyPort),
 	)
 
 	return nil
