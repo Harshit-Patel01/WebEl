@@ -786,21 +786,23 @@ func (h *deployHandlers) triggerDeploy(w http.ResponseWriter, r *http.Request) {
 	var opts *services.DeployOptions
 	if r.ContentLength > 0 {
 		var body struct {
-			Domain       string `json:"domain"`
-			ZoneID       string `json:"zone_id"`
-			ManualDomain bool   `json:"manual_domain"`
-			EnableNginx  *bool  `json:"enable_nginx"`
+			Domain            string `json:"domain"`
+			ZoneID            string `json:"zone_id"`
+			ManualDomain      bool   `json:"manual_domain"`
+			EnableNginx       *bool  `json:"enable_nginx"`
+			AttachToProjectID string `json:"attach_to_project_id"`
 		}
 		if err := parseBody(r, &body); err == nil {
 			opts = &services.DeployOptions{
-				Domain:       body.Domain,
-				ZoneID:       body.ZoneID,
-				ManualDomain: body.ManualDomain,
+				Domain:            body.Domain,
+				ZoneID:            body.ZoneID,
+				ManualDomain:      body.ManualDomain,
+				AttachToProjectID: body.AttachToProjectID,
 			}
 			// Default enable_nginx to true when domain is provided
 			if body.EnableNginx != nil {
 				opts.EnableNginx = *body.EnableNginx
-			} else if body.Domain != "" {
+			} else if body.Domain != "" || body.AttachToProjectID != "" {
 				opts.EnableNginx = true
 			}
 		}

@@ -34,9 +34,20 @@ export default function DeployPage() {
   const [backendInstallCmd, setBackendInstallCmd] = useState('')
   const [backendBuildCmd, setBackendBuildCmd] = useState('')
   const [envVars, setEnvVars] = useState<{ key: string; value: string; is_secret: boolean; visible: boolean }[]>([])
+  // Separate env vars for full-stack deployments
+  const [frontendEnvVars, setFrontendEnvVars] = useState<{ key: string; value: string; is_secret: boolean; visible: boolean }[]>([])
+  const [backendEnvVars, setBackendEnvVars] = useState<{ key: string; value: string; is_secret: boolean; visible: boolean }[]>([])
   const [showBulkImport, setShowBulkImport] = useState(false)
   const [bulkContent, setBulkContent] = useState('')
   const [bulkIsSecret, setBulkIsSecret] = useState(false)
+  const [showFrontendBulkImport, setShowFrontendBulkImport] = useState(false)
+  const [frontendBulkContent, setFrontendBulkContent] = useState('')
+  const [frontendBulkIsSecret, setFrontendBulkIsSecret] = useState(false)
+  const [showBackendBulkImport, setShowBackendBulkImport] = useState(false)
+  const [backendBulkContent, setBackendBulkContent] = useState('')
+  const [backendBulkIsSecret, setBackendBulkIsSecret] = useState(false)
+  const [backendBulkContent, setBackendBulkContent] = useState('')
+  const [backendBulkIsSecret, setBackendBulkIsSecret] = useState(false)
   const [buildPhase, setBuildPhase] = useState(0)
   const [currentDeployId, setCurrentDeployId] = useState<string | null>(null)
   const [deployResult, setDeployResult] = useState<{
@@ -64,8 +75,30 @@ export default function DeployPage() {
   const [backendPort, setBackendPort] = useState('')
   const [hasTunnelSetup, setHasTunnelSetup] = useState(false)
   const [checkingTunnel, setCheckingTunnel] = useState(true)
+  const [availableProjects, setAvailableProjects] = useState<any[]>([])
+  const [attachToProjectId, setAttachToProjectId] = useState('')
 
-  const { subscribe } = useWebSocket()
+  const { subscribe, send, connectionStatus } = useWebSocket()
+
+  // Load projects for attachment
+  useEffect(() => {
+    if (projectType === 'app_service') {
+      deployApi.listProjects().then(projects => {
+        // Filter for web_service projects that have a domain set
+        setAvailableProjects(projects.filter((p: any) =>
+          p.project_type === 'web_service' && p.domain
+        ))
+      }).catch(console.error)
+    }
+  }, [projectType])
+
+  // Subscribe to deploy updates when deployId becomes available and WS is connected
+  useEffect(() => {
+    if (currentDeployId && connectionStatus === 'connected') {
+      // Subscribe to receive messages for this deploy
+      send({ type: 'subscribe_deploy', deployId: currentDeployId })
+    }
+  }, [currentDeployId, connectionStatus, send])
 
   // Load Cloudflare zones on mount
   useEffect(() => {
@@ -140,20 +173,32 @@ export default function DeployPage() {
 
   // Subscribe to phase updates via WS for build progress timeline
   useEffect(() => {
+    // Only subscribe once we're connected and have a deployId
+    if (connectionStatus !== 'connected' || !currentDeployId) {
+      return
+    }
+
     const unsubProgress = subscribe('progress', (message) => {
+      // Filter out messages not for our current deploy
+      if (message.jobId && message.jobId !== currentDeployId) {
+        return
+      }
       const phaseMap: Record<string, number> = {
         clone: 0, detect: 1, build: 2, service: 3, done: 4,
-        install: 2,
+        install: 2, // Map install to build phase
       }
       if (message.phase && phaseMap[message.phase] !== undefined) {
-        setBuildPhase(phaseMap[message.phase])
+        const newPhase = phaseMap[message.phase]
+        // Only update if the new phase is greater than or equal to current phase
+        // This prevents the timeline from going backwards
+        setBuildPhase(prev => Math.max(prev, newPhase))
       }
     })
 
     return () => {
       unsubProgress()
     }
-  }, [subscribe])
+  }, [subscribe, currentDeployId, connectionStatus])
 
   const handleDeploy = async () => {
     if (!repoUrl) {
@@ -215,20 +260,47 @@ export default function DeployPage() {
 
       const project = await response.json()
 
-      // 2. Save env vars
-      for (const v of envVars) {
-        if (v.key) {
-          await envApi.create(project.id, {
-            key: v.key,
-            value: v.value,
-            is_secret: v.is_secret,
-          })
+      // 2. Save env vars based on project type
+      if (projectType === 'full_stack') {
+        // Save frontend env vars with FRONTEND_ prefix
+        for (const v of frontendEnvVars) {
+          if (v.key) {
+            await envApi.create(project.id, {
+              key: `FRONTEND_${v.key}`,
+              value: v.value,
+              is_secret: v.is_secret,
+            })
+          }
+        }
+        // Save backend env vars with BACKEND_ prefix
+        for (const v of backendEnvVars) {
+          if (v.key) {
+            await envApi.create(project.id, {
+              key: `BACKEND_${v.key}`,
+              value: v.value,
+              is_secret: v.is_secret,
+            })
+          }
+        }
+      } else {
+        // Save single set of env vars for web_service and app_service
+        for (const v of envVars) {
+          if (v.key) {
+            await envApi.create(project.id, {
+              key: v.key,
+              value: v.value,
+              is_secret: v.is_secret,
+            })
+          }
         }
       }
 
       // 3. Trigger deploy
       const deployOptions: any = {}
-      if (domain || subdomain) {
+
+      if (attachToProjectId) {
+        deployOptions.attach_to_project_id = attachToProjectId
+      } else if (domain || subdomain) {
         // Construct full domain with subdomain if provided
         const fullDomain = subdomain ? `${subdomain}.${domain}` : domain
         deployOptions.domain = fullDomain
@@ -467,7 +539,11 @@ export default function DeployPage() {
 
             {currentDeployId && (
               <div className="mt-6">
-                <BuildProgress currentPhase={buildPhase} />
+                <BuildProgress
+                  currentPhase={buildPhase}
+                  isBackend={projectType === 'backend'}
+                  isFullStack={projectType === 'fullstack'}
+                />
                 <div className="mt-4">
                   <DeployLogStream deployId={currentDeployId} maxHeight="400px" />
                 </div>
@@ -506,13 +582,13 @@ export default function DeployPage() {
                       Project Type
                     </h3>
                   </div>
-                  <div className="flex gap-2 bg-bg-primary  p-1.5">
+                  <div className="flex flex-col sm:flex-row gap-2 bg-bg-primary p-1.5">
                     {(['web_service', 'app_service', 'full_stack'] as ProjectType[]).map(type => (
                       <button
                         key={type}
                         onClick={() => setProjectType(type)}
                         disabled={deploying}
-                        className={`flex-1 px-6 py-3 -md font-mono text-small uppercase tracking-wider transition-all ${
+                        className={`flex-1 px-4 sm:px-6 py-3 font-mono text-[10px] sm:text-small uppercase tracking-wider transition-all ${
                           projectType === type
                             ? 'bg-accent-lime text-text-dark font-bold shadow-lg'
                             : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
@@ -665,10 +741,10 @@ export default function DeployPage() {
                             onChange={e => setBuildCmd(e.target.value)}
                             disabled={deploying}
                             className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                            placeholder="build"
+                            placeholder="npm run build"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Script name only (e.g., "build" for npm run build)
+                            Full command (e.g., "npm run build", "yarn build")
                           </p>
                         </div>
                         <div>
@@ -700,10 +776,10 @@ export default function DeployPage() {
                             onChange={e => setFrontendBuildCmd(e.target.value)}
                             disabled={deploying}
                             className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                            placeholder="build"
+                            placeholder="npm run build"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Frontend build script (e.g., "build" for npm run build)
+                            Full build command (e.g., "npm run build", "yarn build")
                           </p>
                         </div>
                         <div>
@@ -732,6 +808,9 @@ export default function DeployPage() {
                             className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                             placeholder="npm install"
                           />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Full install command (e.g., "npm install", "yarn install", "pip install -r requirements.txt")
+                          </p>
                         </div>
                         <div>
                           <label className="block font-mono text-[11px] text-text-secondary mb-2">
@@ -745,7 +824,7 @@ export default function DeployPage() {
                             placeholder="(optional - for custom build steps)"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Optional backend build script
+                            Full backend build command (e.g., "go build", "npm run build")
                           </p>
                         </div>
                         <div>
@@ -759,6 +838,9 @@ export default function DeployPage() {
                             className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                             placeholder="pip install -r requirements.txt"
                           />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Full install command (e.g., "npm install", "pip install -r requirements.txt", "go mod download")
+                          </p>
                         </div>
                       </>
                     )}
@@ -775,6 +857,9 @@ export default function DeployPage() {
                           className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
                           placeholder="npm install"
                         />
+                        <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                          Full install command (e.g., "npm install", "pip install -r requirements.txt", "go mod download")
+                        </p>
                       </div>
                     )}
 
@@ -789,15 +874,15 @@ export default function DeployPage() {
                             onChange={e => setStartCmd(e.target.value)}
                             disabled={deploying}
                             className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                            placeholder="start"
+                            placeholder="npm start"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Script name only (e.g., "start" for npm start)
+                            Full start command (e.g. "npm start", "node server.js", "python main.py")
                           </p>
                         </div>
                         <div>
                           <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                            {projectType === 'full_stack' ? 'Backend Port' : 'Service Port'}
+                            {projectType === 'full_stack' ? 'Backend Internal Port' : 'Service Internal Port'}
                           </label>
                           <input
                             value={backendPort}
@@ -808,7 +893,7 @@ export default function DeployPage() {
                             placeholder="8000"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Port your {projectType === 'full_stack' ? 'backend' : 'service'} app is running on
+                            The internal port your app listens on. (A free external port will be mapped automatically)
                           </p>
                         </div>
                       </>
@@ -816,190 +901,174 @@ export default function DeployPage() {
                   </div>
                 </div>
 
-                {/* Domain Configuration */}
-                <div className="border-t border-border-dark pt-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Globe size={16} className="text-accent-lime" />
-                    <label className="font-mono text-label uppercase tracking-wider text-text-secondary">
-                      Domain Configuration (Optional)
-                    </label>
-                  </div>
-
-                  {/* Deployment Target Selection */}
-                  {!checkingTunnel && (
-                    <div className="mb-4">
-                      <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                        Deployment Target
+                {projectType === 'app_service' && availableProjects.length > 0 && (
+                  <div className="border-t border-border-dark pt-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Globe size={16} className="text-accent-lime" />
+                      <label className="font-mono text-label uppercase tracking-wider text-text-secondary">
+                        Attach to Web Service (Optional)
                       </label>
-                      <div className="grid grid-cols-2 gap-2 bg-bg-primary p-1.5">
-                        <button
-                          onClick={() => setDeploymentTarget('local')}
-                          disabled={deploying}
-                          className={`px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-all ${
-                            deploymentTarget === 'local'
-                              ? 'bg-accent-lime text-text-dark font-bold'
-                              : 'text-text-secondary hover:text-text-primary'
-                          }`}
-                        >
-                          Keep it in your network
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (!hasTunnelSetup) {
-                              if (confirm('Cloudflare Tunnel is not set up. Would you like to set it up now?')) {
-                                window.location.href = '/tunnel/dashboard'
-                              }
-                              return
-                            }
-                            setDeploymentTarget('internet')
-                          }}
-                          disabled={deploying}
-                          className={`px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-all ${
-                            deploymentTarget === 'internet'
-                              ? 'bg-accent-lime text-text-dark font-bold'
-                              : 'text-text-secondary hover:text-text-primary'
-                          } ${!hasTunnelSetup ? 'opacity-50' : ''}`}
-                        >
-                          Open it to internet
-                        </button>
-                      </div>
-                      <div className="mt-2 flex items-start gap-2">
-                        {deploymentTarget === 'local' && (
-                          <>
-                            <Info size={12} className="text-blue-400 flex-shrink-0 mt-0.5" />
-                            <p className="font-mono text-[10px] text-text-secondary">
-                              Deploy with nginx configuration. You may need to add a hostname with your server's private IP to access the frontend locally.
-                            </p>
-                          </>
-                        )}
-                        {deploymentTarget === 'internet' && (
-                          <p className="font-mono text-[10px] text-text-secondary">
-                            Deploy via Cloudflare Tunnel with automatic HTTPS, DNS, and CDN
-                          </p>
-                        )}
-                      </div>
                     </div>
-                  )}
-
-                  {cloudflareZones.length > 0 && !manualDomain ? (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                          Select Cloudflare Domain
-                        </label>
-                        <select
-                          value={selectedZoneId}
-                          onChange={(e) => {
-                            setSelectedZoneId(e.target.value)
-                            const zone = cloudflareZones.find(z => z.id === e.target.value)
-                            if (zone) {
-                              setDomain(zone.name)
-                              setSubdomain('')
-                            } else {
-                              setDomain('')
-                              setSubdomain('')
-                            }
-                          }}
-                          disabled={deploying}
-                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50"
-                        >
-                          <option value="">-- No domain (skip nginx) --</option>
-                          {cloudflareZones.map(zone => (
-                            <option key={zone.id} value={zone.id}>{zone.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {selectedZoneId && (
-                        <div>
-                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                            Subdomain (Optional)
-                          </label>
-                          <div className="flex items-center gap-2">
-                            <input
-                              value={subdomain}
-                              onChange={(e) => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                              disabled={deploying}
-                              className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
-                              placeholder="project-1"
-                            />
-                            <span className="font-mono text-small text-text-secondary">.{domain}</span>
-                          </div>
-                          <p className="mt-1 font-mono text-[10px] text-text-secondary">
-                            Leave blank to deploy on root domain ({domain})
-                          </p>
-                        </div>
-                      )}
-
-                      {deploymentTarget === 'internet' && selectedZoneId && (projectType === 'app_service' || projectType === 'full_stack') && (
-                        <div className="mt-4 p-4 bg-blue-900/20 border border-blue-800/50 ">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Globe size={14} className="text-blue-400" />
-                            <span className="font-mono text-[11px] text-blue-400 font-bold uppercase">Backend Port Configuration</span>
-                          </div>
-                          <div>
-                            <label className="block font-mono text-[10px] text-blue-300 mb-1">
-                              Backend Port
-                            </label>
-                            <input
-                              type="number"
-                              value={backendPort}
-                              onChange={(e) => setBackendPort(e.target.value)}
-                              disabled={deploying}
-                              className="w-full px-3 py-2 bg-bg-primary border border-blue-800/50  font-mono text-small text-text-primary disabled:opacity-50"
-                              placeholder="8000"
-                              min="1"
-                              max="65535"
-                            />
-                            <p className="mt-2 font-mono text-[10px] text-blue-300">
-                              Port your backend app is exposing
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        onClick={() => setManualDomain(true)}
-                        disabled={deploying}
-                        className="font-mono text-[11px] text-text-secondary hover:text-accent-lime transition-colors disabled:opacity-50"
-                      >
-                        Or enter domain manually
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block font-mono text-[11px] text-text-secondary mb-2">
-                          Domain Name
-                        </label>
-                        <input
-                          value={domain}
-                          onChange={(e) => setDomain(e.target.value)}
-                          disabled={deploying}
-                          className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
-                          placeholder="example.com or subdomain.example.com"
-                        />
-                      </div>
-                      {cloudflareZones.length > 0 && (
-                        <button
-                          onClick={() => {
-                            setManualDomain(false)
+                    <div className="mb-4">
+                      <p className="font-mono text-[10px] text-text-secondary mb-3">
+                        Deploy this backend to an existing frontend's domain under the "/api" path.
+                      </p>
+                      <select
+                        value={attachToProjectId}
+                        onChange={(e) => {
+                          setAttachToProjectId(e.target.value)
+                          if (e.target.value) {
+                            // Clear domain settings if we attach to a project
                             setDomain('')
                             setSubdomain('')
-                          }}
-                          disabled={deploying}
-                          className="font-mono text-[11px] text-text-secondary hover:text-accent-lime transition-colors disabled:opacity-50"
-                        >
-                          Back to Cloudflare domains
-                        </button>
+                            setSelectedZoneId('')
+                          }
+                        }}
+                        disabled={deploying}
+                        className="w-full px-4 py-3 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                      >
+                        <option value="">-- Do not attach --</option>
+                        {availableProjects.map(proj => (
+                          <option key={proj.id} value={proj.id}>
+                            {proj.name} ({proj.domain})
+                          </option>
+                        ))}
+                      </select>
+                      {attachToProjectId && (
+                        <div className="mt-3 p-3 bg-blue-900/20 border border-blue-800/50">
+                          <p className="font-mono text-[10px] text-blue-300">
+                            <strong>Note:</strong> Make sure your frontend fetches API requests from <code>/api</code> (e.g., <code>fetch('/api/users')</code>). OpenDeploy will automatically proxy these requests to your backend without the <code>/api</code> prefix.
+                          </p>
+                        </div>
                       )}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {domain && (
-                    <div className="mt-3">
-                      {deploymentTarget === 'local' && (
-                        <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
+                {/* Domain Configuration */}
+                {attachToProjectId === '' && (
+                  <div className="border-t border-border-dark pt-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Globe size={16} className="text-accent-lime" />
+                      <label className="font-mono text-label uppercase tracking-wider text-text-secondary">
+                        Domain Configuration (Optional)
+                      </label>
+                    </div>
+
+                    {/* Tunnel Toggle */}
+                    <div className="mb-4">
+                      <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={deploymentTarget === 'internet'}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              if (!hasTunnelSetup) {
+                                if (confirm('Cloudflare Tunnel is not set up. Would you like to set it up now?')) {
+                                  window.location.href = '/tunnel/dashboard'
+                                }
+                                return
+                              }
+                              setDeploymentTarget('internet')
+                            } else {
+                              setDeploymentTarget('local')
+                            }
+                          }}
+                          disabled={deploying || (!hasTunnelSetup && deploymentTarget === 'internet')}
+                          className="accent-accent-lime"
+                        />
+                        Enable Cloudflare Tunnel (Expose to Internet)
+                      </label>
+                      <p className="mt-1 font-mono text-[10px] text-text-secondary">
+                        {deploymentTarget === 'internet'
+                          ? "Deploy via Cloudflare Tunnel with automatic HTTPS, DNS, and CDN"
+                          : "Deploy locally with optional nginx configuration"}
+                      </p>
+                    </div>
+
+                    {/* Domain Configuration when Tunnel Enabled */}
+                    {deploymentTarget === 'internet' && (
+                      <div className="space-y-3">
+                        {cloudflareZones.length > 0 ? (
+                          <>
+                            <div>
+                              <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                                Select Cloudflare Domain
+                              </label>
+                              <select
+                                value={selectedZoneId}
+                                onChange={(e) => {
+                                  setSelectedZoneId(e.target.value)
+                                  const zone = cloudflareZones.find(z => z.id === e.target.value)
+                                  if (zone) {
+                                    setDomain(zone.name)
+                                    setSubdomain('')
+                                  } else {
+                                    setDomain('')
+                                    setSubdomain('')
+                                  }
+                                }}
+                                disabled={deploying}
+                                className="w-full px-4 py-3 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                              >
+                                <option value="">-- Select a domain --</option>
+                                {cloudflareZones.map(zone => (
+                                  <option key={zone.id} value={zone.id}>{zone.name}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {selectedZoneId && (
+                              <div>
+                                <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                                  Subdomain (Optional)
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    value={subdomain}
+                                    onChange={(e) => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                                    disabled={deploying}
+                                    className="flex-1 px-4 py-3 bg-bg-primary border border-border-dark font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
+                                    placeholder="project-1"
+                                  />
+                                  <span className="font-mono text-small text-text-secondary">.{domain}</span>
+                                </div>
+                                <p className="mt-1 font-mono text-[10px] text-text-secondary">
+                                  Leave blank to deploy on root domain ({domain})
+                                </p>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="p-4 bg-yellow-900/20 border border-yellow-800/50">
+                            <p className="font-mono text-[11px] text-yellow-500 mb-2">
+                              No Cloudflare domains found. You need to configure a domain in Cloudflare first to deploy to the internet.
+                            </p>
+                            <Link href="/tunnel/dashboard" className="text-accent-lime hover:underline font-mono text-[11px]">
+                              Go to Cloudflare Tunnel Dashboard
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Local Domain Configuration */}
+                    {deploymentTarget === 'local' && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Local Domain or IP (Optional)
+                          </label>
+                          <input
+                            value={domain}
+                            onChange={(e) => setDomain(e.target.value)}
+                            disabled={deploying}
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark font-mono text-small text-text-primary placeholder:text-text-secondary disabled:opacity-50"
+                            placeholder="e.g., myserver.local or 192.168.1.100"
+                          />
+                        </div>
+
+                        <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary mt-3">
                           <input
                             type="checkbox"
                             checked={enableNginx}
@@ -1009,28 +1078,27 @@ export default function DeployPage() {
                           />
                           Auto-configure nginx for this domain
                         </label>
-                      )}
-                      <p className="mt-2 font-mono text-[10px] text-text-secondary">
-                        {deploymentTarget === 'local' && (
-                          subdomain ? (
-                            <>Nginx will route {subdomain}.{domain} (/ to frontend{(projectType === 'app_service' || projectType === 'full_stack') && backendPort ? `, /api to backend on port ${backendPort}` : ''})</>
-                          ) : (
-                            <>Nginx will route / to frontend{(projectType === 'app_service' || projectType === 'full_stack') && backendPort ? ` and /api to backend on port ${backendPort}` : ''}</>
-                          )
-                        )}
-                        {deploymentTarget === 'internet' && (
-                          <>Your app will be accessible at https://{subdomain ? `${subdomain}.${domain}` : domain} via Cloudflare Tunnel (routed through nginx on port 80)</>
-                        )}
-                      </p>
-                    </div>
-                  )}
+                      </div>
+                    )}
 
-                  {loadingZones && (
-                    <p className="mt-2 font-mono text-[10px] text-text-secondary animate-pulse">
-                      Loading Cloudflare zones...
-                    </p>
-                  )}
-                </div>
+                    {domain && (
+                      <div className="mt-3 p-3 bg-bg-secondary border border-border-dark">
+                        <p className="font-mono text-[10px] text-text-secondary">
+                          {deploymentTarget === 'internet'
+                            ? <>Your app will be accessible at <strong>https://{subdomain ? `${subdomain}.${domain}` : domain}</strong> via Cloudflare Tunnel.</>
+                            : <>Nginx will route requests for <strong>{domain}</strong> to your {projectType === 'web_service' ? 'frontend' : 'backend/frontend'}.</>
+                          }
+                        </p>
+                      </div>
+                    )}
+
+                    {loadingZones && (
+                      <p className="mt-2 font-mono text-[10px] text-text-secondary animate-pulse">
+                        Loading Cloudflare zones...
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Environment Variables */}
                 <div className="border-t border-border-dark pt-6">
@@ -1062,7 +1130,7 @@ export default function DeployPage() {
                     </div>
                   </div>
 
-                  {showBulkImport && (
+,
                     <div className="mb-3 p-3 bg-bg-primary border border-border-dark ">
                       <p className="font-mono text-[10px] text-text-secondary mb-2">
                         Paste .env format (KEY=VALUE per line)
@@ -1169,6 +1237,8 @@ export default function DeployPage() {
                       </button>
                     </div>
                   ))}
+
+                  {/* Frontend Backend Env Vars handlers for full-stack - will be conditionally rendered */}
                 </div>
 
                 {/* Deploy Button */}
@@ -1221,7 +1291,11 @@ export default function DeployPage() {
             </div>
             <div className="p-6">
               <div className="mb-4">
-                <BuildProgress currentPhase={buildPhase} />
+                <BuildProgress
+                  currentPhase={buildPhase}
+                  isBackend={deployResult.isBackend}
+                  isFullStack={projectType === 'fullstack'}
+                />
               </div>
               <div>
                 <DeployLogStream

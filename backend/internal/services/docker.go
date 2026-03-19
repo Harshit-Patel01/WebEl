@@ -96,9 +96,16 @@ func (d *DockerService) GenerateDockerfile(framework FrameworkType, installCmd, 
 
 func (d *DockerService) dockerfileNodeExpress(installCmd, startCmd string, port int) string {
 	if installCmd == "" {
-		installCmd = "npm install"
+		// Generate package-lock.json if missing, then use npm ci for faster, deterministic installs
+		installCmd = `if [ ! -f "package-lock.json" ]; then npm install --package-lock-only --no-audit --no-fund; fi && npm ci --prefer-offline --no-audit --no-fund`
+	} else if installCmd == "install" {
+		installCmd = `if [ -f "package-lock.json" ]; then npm ci --prefer-offline --no-audit --no-fund; else npm install --prefer-offline --no-audit --no-fund; fi`
 	}
 	if startCmd == "" {
+		startCmd = "npm start"
+	} else if !strings.Contains(startCmd, " ") && startCmd != "start" {
+		startCmd = "npm run " + startCmd
+	} else if startCmd == "start" {
 		startCmd = "npm start"
 	}
 	if port == 0 {
@@ -115,9 +122,16 @@ CMD ["/bin/sh", "-c", "%s"]
 
 func (d *DockerService) dockerfileNodeStatic(installCmd, buildCmd string) string {
 	if installCmd == "" {
-		installCmd = "npm install"
+		// Generate package-lock.json if missing, then use npm ci for faster, deterministic installs
+		installCmd = `if [ ! -f "package-lock.json" ]; then npm install --package-lock-only --no-audit --no-fund; fi && npm ci --prefer-offline --no-audit --no-fund`
+	} else if installCmd == "install" {
+		installCmd = `if [ -f "package-lock.json" ]; then npm ci --prefer-offline --no-audit --no-fund; else npm install --prefer-offline --no-audit --no-fund; fi`
 	}
 	if buildCmd == "" {
+		buildCmd = "npm run build"
+	} else if !strings.Contains(buildCmd, " ") && buildCmd != "build" {
+		buildCmd = "npm run " + buildCmd
+	} else if buildCmd == "build" {
 		buildCmd = "npm run build"
 	}
 	// Frontend always serves on port 80 inside the container
@@ -235,13 +249,29 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 		defer os.Remove(dockerignorePath)
 	}
 
-	// Build Docker image
+	// Build Docker image with BuildKit and optimized settings
 	imageName := fmt.Sprintf("opendeploy/%s:latest", imageTag)
 	buildArgs := []string{
 		"build",
 		"--progress=plain",
 		"-f", dockerfilePath,
 		"-t", imageName,
+		"--build-arg", "BUILDKIT_INLINE_CACHE=1",
+		"--memory", "4G",
+		"--cpuset-cpus", "0-3",
+	}
+
+	// Only use cache-from if the image already exists
+	result, err := d.runner.Run(ctx, exec.RunOpts{
+		JobType: "docker_image_check",
+		Command: d.cfg.DockerBinary,
+		Args:    []string{"image", "inspect", imageName},
+		Timeout: 5 * time.Second,
+	})
+	if err == nil && result != nil && result.Success {
+		buildArgs = append(buildArgs, "--cache-from", imageName)
+		// Also enable cache-to for future builds
+		buildArgs = append(buildArgs, "--cache-to", fmt.Sprintf("type=registry,ref=%s,mode=max", imageName))
 	}
 
 	// Add env vars as build args
@@ -250,6 +280,13 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 	}
 
 	buildArgs = append(buildArgs, buildCtxDir)
+
+	// Enable BuildKit optimizations
+	if buildEnvVars == nil {
+		buildEnvVars = make(map[string]string)
+	}
+	buildEnvVars["DOCKER_BUILDKIT"] = "1"
+	buildEnvVars["BUILDKIT_PROGRESS"] = "plain"
 
 	d.logger.Info("building docker image",
 		zap.String("projectId", projectID),
@@ -265,6 +302,7 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 		Command:        d.cfg.DockerBinary,
 		Args:           buildArgs,
 		MergeEnv:       true,
+		Env:            map[string]string{"DOCKER_BUILDKIT": "1"},
 		Timeout:        d.cfg.BuildTimeout,
 	})
 	if err != nil || !buildResult.Success {
