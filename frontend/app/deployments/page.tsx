@@ -277,7 +277,9 @@ export default function DeploymentsPage() {
     const project = projects.find(p => p.id === projectId)
     if (project) {
       const projectContainers = containers[projectId] || []
-      const container = projectContainers[0]
+      // For full-stack, prefer backend container port
+      const backendContainer = projectContainers.find(c => c.name.includes('-backend'))
+      const container = backendContainer || projectContainers[0]
       if (container?.port_mappings) {
         try {
           const mapping = JSON.parse(container.port_mappings)
