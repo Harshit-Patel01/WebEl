@@ -219,6 +219,7 @@ export const deployApi = {
     zone_id?: string;
     manual_domain?: boolean;
     enable_nginx?: boolean;
+    attach_to_project_id?: string;
   }) => fetchApi<{ deploy_id: string; status: string }>(`/projects/${projectId}/deploy`, {
     method: 'POST',
     body: options ? JSON.stringify(options) : undefined,
