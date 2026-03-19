@@ -244,9 +244,20 @@ export default function DeployLogStream({
     ? logs.filter(l => l.message.toLowerCase().includes(filter.toLowerCase()))
     : logs
 
+  // Separate frontend and backend logs for full-stack deployments
+  const frontendLogs = filteredLogs.filter(l => l.message.startsWith('[FRONTEND]'))
+  const backendLogs = filteredLogs.filter(l => l.message.startsWith('[BACKEND]'))
+  const otherLogs = filteredLogs.filter(l => !l.message.startsWith('[FRONTEND]') && !l.message.startsWith('[BACKEND]'))
+  
+  const isFullStackBuild = frontendLogs.length > 0 || backendLogs.length > 0
+
   const getStreamColor = (stream: string) => {
     if (stream === 'stderr') return 'text-orange-400'
     return 'text-cyan-300'
+  }
+
+  const stripPrefix = (message: string) => {
+    return message.replace(/^\[(FRONTEND|BACKEND)\]\s*/, '')
   }
 
   const getStatusBadge = () => {
@@ -311,24 +322,80 @@ export default function DeployLogStream({
       </div>
 
       {/* Log output */}
-      <div
-        ref={logContainerRef}
-        onScroll={handleScroll}
-        className="bg-zinc-950 border border-zinc-800  p-3 overflow-y-auto font-mono text-xs leading-5 select-text"
-        style={{ maxHeight }}
-      >
-        {filteredLogs.length === 0 && status === 'connecting' && (
-          <div className="text-zinc-600 animate-pulse">Waiting for deployment logs...</div>
-        )}
-        {filteredLogs.map((line, i) => (
-          <div key={i} className={`whitespace-pre-wrap break-all ${getStreamColor(line.stream)}`}>
-            {line.message}
+      {isFullStackBuild ? (
+        // Side-by-side view for full-stack builds
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+          {/* Frontend Logs */}
+          <div className="flex flex-col">
+            <div className="bg-purple-900/20 border-b border-purple-800/50 px-3 py-1.5">
+              <span className="font-mono text-xs font-bold text-purple-400">FRONTEND BUILD</span>
+              <span className="ml-2 text-xs text-zinc-500">({frontendLogs.length} lines)</span>
+            </div>
+            <div
+              ref={logContainerRef}
+              onScroll={handleScroll}
+              className="bg-zinc-950 border border-zinc-800 p-3 overflow-y-auto font-mono text-xs leading-5 select-text"
+              style={{ maxHeight }}
+            >
+              {frontendLogs.length === 0 && status === 'connecting' && (
+                <div className="text-zinc-600 animate-pulse">Waiting for frontend build logs...</div>
+              )}
+              {frontendLogs.map((line, i) => (
+                <div key={i} className={`whitespace-pre-wrap break-all ${getStreamColor(line.stream)}`}>
+                  {stripPrefix(line.message)}
+                </div>
+              ))}
+              {status === 'streaming' && frontendLogs.length > 0 && (
+                <div className="text-purple-400 animate-pulse mt-1">▌</div>
+              )}
+            </div>
           </div>
-        ))}
-        {status === 'streaming' && (
-          <div className="text-zinc-600 animate-pulse mt-1">▌</div>
-        )}
-      </div>
+
+          {/* Backend Logs */}
+          <div className="flex flex-col">
+            <div className="bg-blue-900/20 border-b border-blue-800/50 px-3 py-1.5">
+              <span className="font-mono text-xs font-bold text-blue-400">BACKEND BUILD</span>
+              <span className="ml-2 text-xs text-zinc-500">({backendLogs.length} lines)</span>
+            </div>
+            <div
+              className="bg-zinc-950 border border-zinc-800 p-3 overflow-y-auto font-mono text-xs leading-5 select-text"
+              style={{ maxHeight }}
+            >
+              {backendLogs.length === 0 && status === 'connecting' && (
+                <div className="text-zinc-600 animate-pulse">Waiting for backend build logs...</div>
+              )}
+              {backendLogs.map((line, i) => (
+                <div key={i} className={`whitespace-pre-wrap break-all ${getStreamColor(line.stream)}`}>
+                  {stripPrefix(line.message)}
+                </div>
+              ))}
+              {status === 'streaming' && backendLogs.length > 0 && (
+                <div className="text-blue-400 animate-pulse mt-1">▌</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        // Single view for non-full-stack builds
+        <div
+          ref={logContainerRef}
+          onScroll={handleScroll}
+          className="bg-zinc-950 border border-zinc-800 p-3 overflow-y-auto font-mono text-xs leading-5 select-text"
+          style={{ maxHeight }}
+        >
+          {filteredLogs.length === 0 && status === 'connecting' && (
+            <div className="text-zinc-600 animate-pulse">Waiting for deployment logs...</div>
+          )}
+          {filteredLogs.map((line, i) => (
+            <div key={i} className={`whitespace-pre-wrap break-all ${getStreamColor(line.stream)}`}>
+              {line.message}
+            </div>
+          ))}
+          {status === 'streaming' && (
+            <div className="text-zinc-600 animate-pulse mt-1">▌</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
