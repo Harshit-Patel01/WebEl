@@ -34,6 +34,12 @@ type WifiService struct {
 	logger       *zap.Logger
 	db           *state.DB
 	avahiService *AvahiService
+	wsHub        WSHub
+}
+
+// WSHub interface for broadcasting WebSocket messages
+type WSHub interface {
+	BroadcastAll(msg interface{})
 }
 
 func NewWifiService(runner *exec.Runner, logger *zap.Logger, db *state.DB) *WifiService {
@@ -42,9 +48,15 @@ func NewWifiService(runner *exec.Runner, logger *zap.Logger, db *state.DB) *Wifi
 		logger:       logger,
 		db:           db,
 		avahiService: NewAvahiService(runner, logger),
+		wsHub:        nil, // Will be set via SetWSHub
 	}
 
 	return ws
+}
+
+// SetWSHub sets the WebSocket hub for broadcasting status updates
+func (w *WifiService) SetWSHub(hub WSHub) {
+	w.wsHub = hub
 }
 
 func (w *WifiService) ScanNetworks(ctx context.Context) ([]WifiNetwork, error) {
@@ -267,14 +279,47 @@ func (w *WifiService) Connect(ctx context.Context, ssid, password, jobID string)
 		if err == nil && status.Connected && status.SSID == ssid && status.IP != "" {
 			w.logger.Info("WiFi connected and verified", zap.String("ssid", ssid), zap.String("ip", status.IP))
 			verified = true
+
+			// Broadcast WiFi connection success via WebSocket
+			if w.wsHub != nil {
+				w.wsHub.BroadcastAll(map[string]interface{}{
+					"type":      "wifi_status",
+					"connected": true,
+					"ssid":      ssid,
+					"ip":        status.IP,
+					"state":     "connected",
+				})
+			}
 			break
 		}
 		w.logger.Debug("Waiting for connection to stabilize", zap.Int("attempt", i+1))
+
+		// Send progress updates via WebSocket
+		if w.wsHub != nil {
+			w.wsHub.BroadcastAll(map[string]interface{}{
+				"type":    "wifi_connecting",
+				"ssid":    ssid,
+				"attempt": i + 1,
+				"message": "Waiting for IP assignment...",
+			})
+		}
+
 		time.Sleep(3 * time.Second)
 	}
 
 	if !verified {
 		w.logger.Error("Connection verification failed - no IP assigned after 35 seconds")
+
+		// Broadcast failure via WebSocket
+		if w.wsHub != nil {
+			w.wsHub.BroadcastAll(map[string]interface{}{
+				"type":    "wifi_status",
+				"connected": false,
+				"ssid":    ssid,
+				"error":   "Connection verification failed - no IP assigned after 35 seconds",
+			})
+		}
+
 		return &exec.ExecResult{
 			Success: false,
 			Lines: []exec.LogLine{

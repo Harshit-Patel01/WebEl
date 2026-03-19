@@ -26,6 +26,7 @@ import {
 import Link from 'next/link'
 import SectionBadge from '@/components/ui/SectionBadge'
 import { wifiApi, apApi } from '@/lib/api'
+import { useWebSocket } from '@/hooks/useWebSocket'
 
 type WifiNetwork = {
   ssid: string
@@ -55,6 +56,9 @@ export default function WifiPage() {
   const [connectionLogs, setConnectionLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
 
+  // WebSocket for real-time WiFi status updates
+  const { lastMessage } = useWebSocket()
+
   // AP State
   const [apStatus, setApStatus] = useState<{
     running: boolean
@@ -77,6 +81,45 @@ export default function WifiPage() {
   const [apLoading, setApLoading] = useState(false)
   const [apMessage, setApMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
   const [apToggling, setApToggling] = useState(false)
+
+  // Listen for WiFi status updates via WebSocket
+  useEffect(() => {
+    if (!lastMessage) return
+
+    if (lastMessage.type === 'wifi_status') {
+      // WiFi connection status changed
+      if (lastMessage.connected) {
+        setConnectionLogs(prev => [...prev, `Connected to ${lastMessage.ssid}`, `IP: ${lastMessage.ip}`])
+        setSuccess(true)
+        setConnecting(false)
+        setError(null)
+
+        // Update status
+        setStatus({
+          connected: true,
+          ssid: lastMessage.ssid || '',
+          ip: lastMessage.ip || '',
+          state: 'connected'
+        })
+
+        // Refresh networks list
+        setTimeout(() => {
+          loadNetworks()
+          setSuccess(false)
+        }, 2000)
+      } else if (lastMessage.error) {
+        setConnectionLogs(prev => [...prev, `Error: ${lastMessage.error}`])
+        setError(lastMessage.error)
+        setConnecting(false)
+        setShowLogs(true)
+      }
+    } else if (lastMessage.type === 'wifi_connecting') {
+      // Connection progress update
+      if (lastMessage.message) {
+        setConnectionLogs(prev => [...prev, lastMessage.message])
+      }
+    }
+  }, [lastMessage])
 
   useEffect(() => {
     loadStatus()
@@ -143,32 +186,52 @@ export default function WifiPage() {
     setConnecting(true)
     setError(null)
     setSuccess(false)
-    setConnectionLogs([])
+    setConnectionLogs(['Initiating connection...'])
     setShowLogs(false)
 
     try {
       const res = await wifiApi.connect(ssid, pwd)
 
       if (res.success) {
-        setConnectionLogs(['Connection initiated', 'Verifying network...', 'Successfully connected!'])
+        setConnectionLogs(prev => [...prev, 'Connection request sent', 'Waiting for verification...'])
         setPassword('')
         setSelectedNetwork(null)
-        setSuccess(true)
-        await new Promise(resolve => setTimeout(resolve, 3000))
-        await loadStatus()
-        await loadNetworks()
-        setSuccess(false)
+        // Don't set success here - wait for WebSocket confirmation
+        // The WebSocket listener will handle success/error states
+
+        // Fallback timeout: if no WebSocket update after 45 seconds, check status manually
+        setTimeout(async () => {
+          if (connecting) {
+            setConnectionLogs(prev => [...prev, 'Checking connection status...'])
+            try {
+              const statusCheck = await wifiApi.getStatus()
+              if (statusCheck.connected && statusCheck.ssid === ssid) {
+                setSuccess(true)
+                setConnecting(false)
+                setStatus(statusCheck)
+                await loadNetworks()
+                setTimeout(() => setSuccess(false), 3000)
+              } else {
+                setError('Connection timeout - please check status manually')
+                setConnecting(false)
+              }
+            } catch (err) {
+              setError('Failed to verify connection')
+              setConnecting(false)
+            }
+          }
+        }, 45000)
       } else {
         setConnectionLogs(['Connection failed', 'Check password and try again'])
         setShowLogs(true)
         setError('Failed to connect. Check password and try again.')
+        setConnecting(false)
       }
     } catch (err) {
       const errorMsg = String(err)
       setConnectionLogs(['Connection error', errorMsg])
       setShowLogs(true)
       setError('Connection failed: ' + errorMsg)
-    } finally {
       setConnecting(false)
     }
   }
