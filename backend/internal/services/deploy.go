@@ -653,12 +653,28 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			deploy.Framework = fmt.Sprintf("fullstack_%s", backendFramework)
 			deploy.IsBackend = true
 
-			// ==================== FRONTEND ====================
-			// Build frontend Docker image
-			d.broadcastPhase(deployID, "build", "Building frontend image...")
-			logToDB("stdout", "Building frontend Docker image...")
+			backendContainerPort := GetDefaultPort(backendFramework)
+			if project.LocalPort > 0 {
+				backendContainerPort = project.LocalPort
+			}
 
-			// Inject generic API URL environment variables for common frontend frameworks
+			backendInstallCmd := project.BackendInstallCommand
+			if backendInstallCmd == "" {
+				backendInstallCmd = GetDefaultInstallCommand(backendFramework)
+			}
+
+			startCmd := ""
+			if project.StartCommand != nil && *project.StartCommand != "" {
+				startCmd = *project.StartCommand
+			} else {
+				startCmd = GetDefaultStartCommand(backendFramework, backendContainerPort)
+			}
+
+			// ==================== PARALLEL BUILD ====================
+			d.broadcastPhase(deployID, "build", "Building frontend and backend images in parallel...")
+			logToDB("stdout", "Building frontend and backend Docker images in parallel...")
+
+			// Prepare frontend env vars
 			frontendEnvVars := make(map[string]string)
 			for k, v := range envVars {
 				frontendEnvVars[k] = v
@@ -668,26 +684,116 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			frontendEnvVars["VITE_API_URL"] = "/api"
 			frontendEnvVars["API_URL"] = "/api"
 
-			frontendDockerResult, frontendDockerErr := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-frontend", FrameworkNodeStatic, "", "", 80, frontendEnvVars, frontendDir, project.OutputDir, project.ID+"-frontend")
-			if frontendDockerResult != nil {
-				for _, line := range frontendDockerResult.Lines {
-					dbLog := &state.DeployLog{
-						DeployID:     deployID,
-						Stream:       line.Stream,
-						Message:      line.Text,
-						LogTimestamp: line.Timestamp,
+			// Use channels to collect results from parallel builds
+			type buildResult struct {
+				name   string
+				result *exec.ExecResult
+				err    error
+			}
+
+			buildResults := make(chan buildResult, 2)
+
+			// Build frontend in goroutine
+			go func() {
+				result, err := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-frontend", FrameworkNodeStatic, "", "", 80, frontendEnvVars, frontendDir, project.OutputDir, project.ID+"-frontend")
+				buildResults <- buildResult{name: "frontend", result: result, err: err}
+			}()
+
+			// Build backend in goroutine
+			go func() {
+				// Run backend build command if provided (before Docker build)
+				if project.BackendBuildCommand != "" {
+					logToDB("stdout", fmt.Sprintf("Running backend build command: %s", project.BackendBuildCommand))
+					buildCmdResult, buildCmdErr := d.runner.Run(deployCtx, exec.RunOpts{
+						JobID:          deployID + "-backend-build",
+						BroadcastJobID: deployID,
+						JobType:        "backend_build",
+						Command:        "/bin/sh",
+						Args:           []string{"-c", project.BackendBuildCommand},
+						WorkDir:        backendProjectDir,
+						Env:            envVars,
+						MergeEnv:       true,
+						Timeout:        d.cfg.BuildTimeout,
+					})
+					if buildCmdResult != nil {
+						for _, line := range buildCmdResult.Lines {
+							dbLog := &state.DeployLog{
+								DeployID:     deployID,
+								Stream:       line.Stream,
+								Message:      line.Text,
+								LogTimestamp: line.Timestamp,
+							}
+							d.db.CreateDeployLog(dbLog)
+						}
 					}
-					d.db.CreateDeployLog(dbLog)
+					if buildCmdErr != nil || (buildCmdResult != nil && !buildCmdResult.Success) {
+						buildResults <- buildResult{name: "backend", result: nil, err: fmt.Errorf("backend build command failed")}
+						return
+					}
+					logToDB("stdout", "Backend build command completed successfully")
+				}
+
+				result, err := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-backend", backendFramework, backendInstallCmd, startCmd, backendContainerPort, envVars, backendDir, "", project.ID+"-backend")
+				buildResults <- buildResult{name: "backend", result: result, err: err}
+			}()
+
+			// Collect results from both builds
+			var frontendDockerResult, backendDockerResult *exec.ExecResult
+			var frontendDockerErr, backendDockerErr error
+
+			for i := 0; i < 2; i++ {
+				result := <-buildResults
+				if result.name == "frontend" {
+					frontendDockerResult = result.result
+					frontendDockerErr = result.err
+					if result.result != nil {
+						for _, line := range result.result.Lines {
+							dbLog := &state.DeployLog{
+								DeployID:     deployID,
+								Stream:       line.Stream,
+								Message:      "[FRONTEND] " + line.Text,
+								LogTimestamp: line.Timestamp,
+							}
+							d.db.CreateDeployLog(dbLog)
+						}
+					}
+				} else {
+					backendDockerResult = result.result
+					backendDockerErr = result.err
+					if result.result != nil {
+						for _, line := range result.result.Lines {
+							dbLog := &state.DeployLog{
+								DeployID:     deployID,
+								Stream:       line.Stream,
+								Message:      "[BACKEND] " + line.Text,
+								LogTimestamp: line.Timestamp,
+							}
+							d.db.CreateDeployLog(dbLog)
+						}
+					}
 				}
 			}
+
+			// Suppress unused warnings (results are used for logging above)
+			_ = frontendDockerResult
+			_ = backendDockerResult
+
+			// Check for build errors
 			if frontendDockerErr != nil {
 				logToDB("stderr", fmt.Sprintf("Frontend Docker build failed: %s", frontendDockerErr.Error()))
 				d.failDeploy(deploy, frontendDockerErr.Error())
 				return
 			}
-			logToDB("stdout", "Frontend image built successfully")
+			if backendDockerErr != nil {
+				logToDB("stderr", fmt.Sprintf("Backend Docker build failed: %s", backendDockerErr.Error()))
+				d.failDeploy(deploy, backendDockerErr.Error())
+				return
+			}
 
-			// Start frontend container (serve on port 80, mapped to available host port)
+			logToDB("stdout", "Frontend and backend images built successfully")
+
+			// ==================== START CONTAINERS ====================
+			// Start frontend container
 			d.broadcastPhase(deployID, "service", "Starting frontend container...")
 			logToDB("stdout", "Starting frontend container...")
 
@@ -712,80 +818,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 					logToDB("stdout", fmt.Sprintf("Frontend container started: %s (host port %d → container port 80)", frontendContainer.Name, frontendHostPort))
 				}
 			}
-
-			// ==================== BACKEND ====================
-			// Build backend in Docker
-			d.broadcastPhase(deployID, "build", "Building backend image...")
-			logToDB("stdout", "Building backend Docker image...")
-
-			backendContainerPort := GetDefaultPort(backendFramework)
-			if project.LocalPort > 0 {
-				backendContainerPort = project.LocalPort
-			}
-
-			backendInstallCmd := project.BackendInstallCommand
-			if backendInstallCmd == "" {
-				backendInstallCmd = GetDefaultInstallCommand(backendFramework)
-			}
-
-			// Run backend build command if provided
-			if project.BackendBuildCommand != "" {
-				logToDB("stdout", fmt.Sprintf("Running backend build command: %s", project.BackendBuildCommand))
-				buildResult, buildErr := d.runner.Run(deployCtx, exec.RunOpts{
-					JobID:          deployID + "-backend-build",
-					BroadcastJobID: deployID,
-					JobType:        "backend_build",
-					Command:        "/bin/sh",
-					Args:           []string{"-c", project.BackendBuildCommand},
-					WorkDir:        backendProjectDir,
-					Env:            envVars,
-					MergeEnv:       true,
-					Timeout:        d.cfg.BuildTimeout,
-				})
-				if buildResult != nil {
-					for _, line := range buildResult.Lines {
-						dbLog := &state.DeployLog{
-							DeployID:     deployID,
-							Stream:       line.Stream,
-							Message:      line.Text,
-							LogTimestamp: line.Timestamp,
-						}
-						d.db.CreateDeployLog(dbLog)
-					}
-				}
-				if buildErr != nil || (buildResult != nil && !buildResult.Success) {
-					logToDB("stderr", "Backend build command failed")
-					d.failDeploy(deploy, "Backend build command failed")
-					return
-				}
-				logToDB("stdout", "Backend build command completed successfully")
-			}
-
-			startCmd := ""
-			if project.StartCommand != nil && *project.StartCommand != "" {
-				startCmd = *project.StartCommand
-			} else {
-				startCmd = GetDefaultStartCommand(backendFramework, backendContainerPort)
-			}
-
-			dockerResult, dockerErr := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-backend", backendFramework, backendInstallCmd, startCmd, backendContainerPort, envVars, backendDir, "", project.ID+"-backend")
-			if dockerResult != nil {
-				for _, line := range dockerResult.Lines {
-					dbLog := &state.DeployLog{
-						DeployID:     deployID,
-						Stream:       line.Stream,
-						Message:      line.Text,
-						LogTimestamp: line.Timestamp,
-					}
-					d.db.CreateDeployLog(dbLog)
-				}
-			}
-			if dockerErr != nil {
-				logToDB("stderr", fmt.Sprintf("Backend Docker build failed: %s", dockerErr.Error()))
-				d.failDeploy(deploy, dockerErr.Error())
-				return
-			}
-			logToDB("stdout", "Backend image built successfully")
 
 			// Start backend container
 			d.broadcastPhase(deployID, "service", "Starting backend container...")
