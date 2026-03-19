@@ -85,6 +85,40 @@ func (c *ContainerService) FindAvailablePort(startPort, endPort int) (int, error
 	return 0, fmt.Errorf("no available ports in range %d-%d", startPort, endPort)
 }
 
+// GetContainerPort uses the docker port command to get the actual mapped host port
+func (c *ContainerService) GetContainerPort(ctx context.Context, containerID string, containerPort int) (int, error) {
+	// Use docker port command to get the mapped host port
+	// Format: docker port <container_id> <container_port>
+	result, err := c.runner.Run(ctx, exec.RunOpts{
+		JobType: "docker_port",
+		Command: c.cfg.DockerBinary,
+		Args:    []string{"port", containerID, fmt.Sprintf("%d/tcp", containerPort)},
+		Timeout: 10 * time.Second,
+	})
+
+	if err != nil || !result.Success {
+		return 0, fmt.Errorf("failed to get container port mapping: %w", err)
+	}
+
+	// Parse output: "0.0.0.0:8080" or ":::8080"
+	for _, line := range result.Lines {
+		if line.Stream == "stdout" {
+			output := strings.TrimSpace(line.Text)
+			// Extract port from output like "0.0.0.0:8080" or ":::8080"
+			parts := strings.Split(output, ":")
+			if len(parts) >= 2 {
+				portStr := parts[len(parts)-1]
+				var port int
+				if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
+					return port, nil
+				}
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("could not parse port from docker port output")
+}
+
 // StartContainer starts a Docker container for a backend project
 func (c *ContainerService) StartContainer(ctx context.Context, projectID, projectName, image string, containerPort int, envVars map[string]string) (*state.Container, error) {
 	containerName := fmt.Sprintf("opendeploy-%s", projectName)
@@ -177,8 +211,27 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 		return nil, fmt.Errorf("failed to get container ID")
 	}
 
-	// Create container record
-	portMappings := map[string]string{"host": fmt.Sprintf("%d", hostPort), "container": fmt.Sprintf("%d", containerPort)}
+	// Use docker port command to get the actual mapped port
+	actualHostPort, portErr := c.GetContainerPort(ctx, containerID, containerPort)
+	if portErr != nil {
+		c.logger.Warn("failed to get actual port from docker, using allocated port",
+			zap.String("containerId", containerID),
+			zap.Error(portErr),
+		)
+		actualHostPort = hostPort // Fallback to allocated port
+	}
+
+	c.logger.Info("container port mapping confirmed",
+		zap.String("containerId", containerID),
+		zap.Int("containerPort", containerPort),
+		zap.Int("actualHostPort", actualHostPort),
+	)
+
+	// Create container record with actual port mapping
+	portMappings := map[string]string{
+		"host":      fmt.Sprintf("%d", actualHostPort),
+		"container": fmt.Sprintf("%d", containerPort),
+	}
 	portJSON, _ := json.Marshal(portMappings)
 
 	container := &state.Container{
@@ -225,7 +278,7 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 		c.logger.Info("container started successfully and is healthy",
 			zap.String("projectId", projectID),
 			zap.String("containerName", containerName),
-			zap.Int("hostPort", hostPort),
+			zap.Int("actualHostPort", actualHostPort),
 			zap.Int("containerPort", containerPort),
 		)
 	} else {

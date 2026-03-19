@@ -40,19 +40,19 @@ cp -r build/* ../backend/static/frontend/
 cd ../backend
 
 # If on Windows (PowerShell):
-$env:GOOS="linux"; $env:GOARCH="arm64"; go build -o opendeploy-linux-arm64 ./cmd/opendeploy
+$env:GOOS="linux"; $env:GOARCH="arm64"; go build -o opendeploy ./cmd/opendeploy
 
 # If on Windows (Git Bash / Unix shell) OR Linux/Mac:
-env GOOS=linux GOARCH=arm64 go build -o opendeploy-linux-arm64 ./cmd/opendeploy
+env GOOS=linux GOARCH=arm64 go build -o opendeploy ./cmd/opendeploy
 ```
 
 ## Deploying to the Pi / Linux
 
-Copy `opendeploy-linux-arm64` and `config.example.yaml` (renamed to `config.yaml`) to your Raspberry Pi.
+Copy `opendeploy` and `config.example.yaml` (renamed to `config.yaml`) to your Raspberry Pi.
 
 ```bash
-chmod +x opendeploy-linux-arm64
-./opendeploy-linux-arm64
+chmod +x opendeploy
+./opendeploy
 ```
 
 To run it automatically on boot, copy `backend/opendeploy.service` to `/etc/systemd/system/opendeploy.service` on the ubuntu/linux, then run:

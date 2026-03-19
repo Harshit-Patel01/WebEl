@@ -20,6 +20,13 @@ export interface WSMessage {
   service?: string
   status?: string
   error?: string
+  // WiFi status fields
+  connected?: boolean
+  ssid?: string
+  ip?: string
+  state?: string
+  attempt?: number
+  message?: string
 }
 
 export function useWebSocket() {

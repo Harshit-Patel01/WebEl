@@ -97,6 +97,7 @@ func main() {
 
 	// Initialize WiFi service and AP
 	wifiSvc := services.NewWifiService(runner, logger, db)
+	wifiSvc.SetWSHub(hub) // Inject WebSocket hub for real-time status updates
 	wifiAP := services.NewWifiAP(runner, logger, db)
 
 	// Run startup health checks and self-healing

@@ -205,8 +205,6 @@ CMD ["/app/server"]
 // The Docker build context is the locally-cloned project directory,
 // so Dockerfiles use COPY instead of cloning the repo again.
 func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID string, framework FrameworkType, installCmd, startCmd string, port int, envVars map[string]string, workingDir, outputDir, imageTag string) (*exec.ExecResult, error) {
-	containerName := fmt.Sprintf("opendeploy-build-%s", projectID)
-
 	// Generate Dockerfile
 	dockerfile := d.GenerateDockerfile(framework, installCmd, startCmd, port)
 

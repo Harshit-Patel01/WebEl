@@ -1060,6 +1060,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				})
 			}
 			d.broadcastPhase(deployID, "done", "Deploy complete!")
+		}
 	}()
 
 	return deployID, nil
