@@ -673,6 +673,17 @@ func (db *DB) GetContainerByProjectID(projectID string) (*Container, error) {
 	return c, err
 }
 
+func (db *DB) GetContainerByName(name string) (*Container, error) {
+	c := &Container{}
+	err := db.conn.QueryRow(
+		"SELECT id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at FROM containers WHERE name = ? ORDER BY created_at DESC LIMIT 1", name,
+	).Scan(&c.ID, &c.ProjectID, &c.Name, &c.Image, &c.ContainerID, &c.Status, &c.PortMappings, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
 func (db *DB) ListContainersByProject(projectID string) ([]Container, error) {
 	query := "SELECT id, project_id, name, image, container_id, status, port_mappings, created_at, updated_at FROM containers"
 	args := []interface{}{}
@@ -837,4 +848,3 @@ func (db *DB) SaveAPConfig(c *APConfig) error {
 	)
 	return err
 }
-
