@@ -49,10 +49,10 @@ type DeployService struct {
 
 // DeployOptions contains optional runtime configuration for a deployment
 type DeployOptions struct {
-	Domain           string
-	ZoneID           string
-	ManualDomain     bool
-	EnableNginx      bool
+	Domain            string
+	ZoneID            string
+	ManualDomain      bool
+	EnableNginx       bool
 	AttachToProjectID string // If attaching this backend to an existing frontend
 }
 
@@ -207,8 +207,8 @@ func (d *DeployService) DetectWorkingDirectory(projectID, userSpecified string) 
 	for _, dir := range commonDirs {
 		testPath := filepath.Join(baseDir, dir)
 		if fileExists(filepath.Join(testPath, "package.json")) ||
-		   fileExists(filepath.Join(testPath, "requirements.txt")) ||
-		   fileExists(filepath.Join(testPath, "go.mod")) {
+			fileExists(filepath.Join(testPath, "requirements.txt")) ||
+			fileExists(filepath.Join(testPath, "go.mod")) {
 			return dir
 		}
 	}
@@ -883,7 +883,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			deploy.Status = "success"
 			deploy.EndedAt = &now
 			deploy.ExitCode = 0
-			deploy.BuildDuration = buildDurationSecondsSeconds
+			deploy.BuildDuration = buildDurationSeconds
 			d.db.UpdateDeploy(deploy)
 
 			// Record performance statistics for auto-optimization

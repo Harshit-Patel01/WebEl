@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,12 +25,12 @@ type PerformanceOptimizer struct {
 }
 
 type BuildStats struct {
-	TotalBuilds    int     `json:"total_builds"`
-	AverageTime    float64 `json:"average_time"`
-	SlowestBuild   float64 `json:"slowest_build"`
-	FastestBuild   float64 `json:"fastest_build"`
-	LastOptimized  string  `json:"last_optimized"`
-	Optimizations  int     `json:"optimizations"`
+	TotalBuilds   int     `json:"total_builds"`
+	AverageTime   float64 `json:"average_time"`
+	SlowestBuild  float64 `json:"slowest_build"`
+	FastestBuild  float64 `json:"fastest_build"`
+	LastOptimized string  `json:"last_optimized"`
+	Optimizations int     `json:"optimizations"`
 }
 
 func NewPerformanceOptimizer(runner *exec.Runner, db *state.DB, logger *zap.Logger) *PerformanceOptimizer {
@@ -258,10 +259,12 @@ func (p *PerformanceOptimizer) SaveStats() error {
 		return err
 	}
 
-	statsFile := filepath.Join(statsDir, "performance_stats.json")
-	// TODO: Implement JSON serialization
-
-	return nil
+	statsFilePath := filepath.Join(statsDir, "performance_stats.json")
+	jsonData, err := json.Marshal(p.stats)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(statsFilePath, jsonData, 0644)
 }
 
 // LoadStats loads statistics from persistent storage
@@ -269,8 +272,20 @@ func (p *PerformanceOptimizer) LoadStats() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	statsFile := "/var/lib/opendeploy/performance_stats.json"
-	// TODO: Implement JSON deserialization
+	statsFilePath := "/var/lib/opendeploy/performance_stats.json"
+	data, err := os.ReadFile(statsFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
 
+	var stats BuildStats
+	if err := json.Unmarshal(data, &stats); err != nil {
+		return err
+	}
+
+	p.stats = &stats
 	return nil
 }
