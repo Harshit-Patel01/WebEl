@@ -66,6 +66,30 @@ func (n *NginxService) GenerateConfig(siteCfg NginxSiteConfig) string {
 	})
 }
 
+func (n *NginxService) GenerateFrontendConfig(siteCfg NginxSiteConfig) string {
+	return templates.RenderFrontendConfig(templates.NginxTemplateData{
+		Domain:               siteCfg.Domain,
+		FrontendPath:         siteCfg.FrontendPath,
+		ProxyEnabled:         siteCfg.ProxyEnabled,
+		ProxyPort:            siteCfg.ProxyPort,
+		ProxyTarget:          siteCfg.ProxyTarget,
+		FrontendProxyEnabled: siteCfg.FrontendProxyEnabled,
+		FrontendProxyPort:    siteCfg.FrontendProxyPort,
+	})
+}
+
+func (n *NginxService) GenerateBackendConfig(siteCfg NginxSiteConfig) string {
+	return templates.RenderBackendConfig(templates.NginxTemplateData{
+		Domain:               siteCfg.Domain,
+		FrontendPath:         siteCfg.FrontendPath,
+		ProxyEnabled:         siteCfg.ProxyEnabled,
+		ProxyPort:            siteCfg.ProxyPort,
+		ProxyTarget:          siteCfg.ProxyTarget,
+		FrontendProxyEnabled: siteCfg.FrontendProxyEnabled,
+		FrontendProxyPort:    siteCfg.FrontendProxyPort,
+	})
+}
+
 func (n *NginxService) WriteConfig(siteName, configContent string) error {
 	availablePath := filepath.Join(n.cfg.SitesAvailable, siteName)
 	enabledPath := filepath.Join(n.cfg.SitesEnabled, siteName)

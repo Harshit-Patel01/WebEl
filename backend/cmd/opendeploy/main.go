@@ -104,6 +104,9 @@ func main() {
 	avahiSvc := services.NewAvahiService(runner, logger)
 	go runStartupHealthChecks(logger, runner, avahiSvc, wifiSvc)
 
+	// Run performance optimization on first boot
+	go runPerformanceOptimization(logger, runner)
+
 	// Ensure AP is running on startup (idempotent)
 	apCtx, cancelAP := context.WithCancel(context.Background())
 	go func() {
@@ -295,4 +298,136 @@ func runStartupHealthChecks(logger *zap.Logger, runner *exec.Runner, avahiSvc *s
 	}
 
 	logger.Info("System health checks completed - backend is ready and self-sufficient")
+}
+
+// runPerformanceOptimization automatically optimizes Docker and system settings for maximum performance
+func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
+	// Wait a bit for system to stabilize
+	time.Sleep(10 * time.Second)
+
+	logger.Info("Starting automatic performance optimization")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// Check if optimization has already been run
+	optimizationMarker := "/var/lib/opendeploy/.performance_optimized"
+	if _, err := os.Stat(optimizationMarker); err == nil {
+		logger.Info("Performance optimization already completed - skipping")
+		return
+	}
+
+	// 1. Optimize Docker daemon configuration
+	logger.Info("Optimizing Docker daemon configuration")
+	dockerConfig := `{
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 65536,
+      "Soft": 65536
+    }
+  },
+  "max-concurrent-downloads": 3,
+  "max-concurrent-uploads": 3,
+  "experimental": false,
+  "storage-driver": "overlay2",
+  "storage-opts": [
+    "overlay2.override_kernel_check=true"
+  ],
+  "cpu-count": 4,
+  "memory": "6G",
+  "cpu-shares": 1024
+}`
+
+	// Write Docker daemon config
+	_, err := runner.Run(ctx, exec.RunOpts{
+		JobType: "docker_optimize_config",
+		Command: "sudo",
+		Args:    []string{"tee", "/etc/docker/daemon.json"},
+		Timeout: 10 * time.Second,
+	})
+
+	if err != nil {
+		logger.Warn("Failed to optimize Docker config", zap.Error(err))
+	} else {
+		logger.Info("Docker configuration optimized")
+	}
+
+	// 2. Set CPU governor to performance
+	logger.Info("Setting CPU governor to performance mode")
+	for i := 0; i < 4; i++ {
+		_, err := runner.Run(ctx, exec.RunOpts{
+			JobType: fmt.Sprintf("cpu_governor_%d", i),
+			Command: "sudo",
+			Args:    []string{"bash", "-c", fmt.Sprintf("echo 'performance' > /sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", i)},
+			Timeout: 5 * time.Second,
+		})
+		if err != nil {
+			logger.Warn(fmt.Sprintf("Failed to set CPU%d governor", i), zap.Error(err))
+		}
+	}
+
+	// 3. Optimize VM settings for better I/O
+	logger.Info("Optimizing VM settings for better I/O")
+	vmCommands := []struct{
+		name string
+		cmd  []string
+	}{
+		{"dirty_background_ratio", []string{"echo", "10", ">", "/proc/sys/vm/dirty_background_ratio"}},
+		{"dirty_ratio", []string{"echo", "20", ">", "/proc/sys/vm/dirty_ratio"}},
+		{"swappiness", []string{"echo", "10", ">", "/proc/sys/vm/swappiness"}},
+	}
+
+	for _, vmCmd := range vmCommands {
+		_, err := runner.Run(ctx, exec.RunOpts{
+			JobType: fmt.Sprintf("vm_optimize_%s", vmCmd.name),
+			Command: "sudo",
+			Args:    vmCmd.cmd,
+			Timeout: 5 * time.Second,
+		})
+		if err != nil {
+			logger.Warn(fmt.Sprintf("Failed to optimize %s", vmCmd.name), zap.Error(err))
+		}
+	}
+
+	// 4. Increase swap space if needed
+	logger.Info("Checking and optimizing swap space")
+	swapCheckCmd := `
+		if [ $(free -h | grep Swap | awk '{print $2}' | sed 's/G//') -lt 2 ]; then
+			sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+			sudo chmod 600 /swapfile
+			sudo mkswap /swapfile
+			sudo swapon /swapfile
+			echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+		fi
+	`
+
+	_, err = runner.Run(ctx, exec.RunOpts{
+		JobType: "swap_optimize",
+		Command: "sudo",
+		Args:    []string{"bash", "-c", swapCheckCmd},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		logger.Warn("Failed to optimize swap space", zap.Error(err))
+	}
+
+	// 5. Restart Docker with new settings
+	logger.Info("Restarting Docker with optimized settings")
+	_, err = runner.Run(ctx, exec.RunOpts{
+		JobType: "docker_restart",
+		Command: "sudo",
+		Args:    []string{"systemctl", "restart", "docker"},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		logger.Warn("Failed to restart Docker", zap.Error(err))
+	} else {
+		logger.Info("Docker restarted with optimized settings")
+	}
+
+	// 6. Create optimization marker
+	os.WriteFile(optimizationMarker, []byte("Performance optimization completed at "+time.Now().String()), 0644)
+
+	logger.Info("Performance optimization completed - Docker and system optimized for maximum build performance")
 }

@@ -44,20 +44,23 @@ type DeployService struct {
 	container     *ContainerService
 	broadcaster   exec.Broadcaster
 	portAllocator *PortAllocator
+	perfOptimizer *PerformanceOptimizer
 }
 
 // DeployOptions contains optional runtime configuration for a deployment
 type DeployOptions struct {
-	Domain       string
-	ZoneID       string
-	ManualDomain bool
-	EnableNginx  bool
+	Domain           string
+	ZoneID           string
+	ManualDomain     bool
+	EnableNginx      bool
+	AttachToProjectID string // If attaching this backend to an existing frontend
 }
 
 func NewDeployService(runner *exec.Runner, db *state.DB, cfg config.DeployConfig, logger *zap.Logger) *DeployService {
 	docker := NewDockerService(runner, cfg, logger)
 	container := NewContainerService(runner, db, cfg, logger)
 	portAllocator := NewPortAllocator(db, cfg.PortPoolStart, cfg.PortPoolEnd)
+	perfOptimizer := NewPerformanceOptimizer(runner, db, logger)
 	return &DeployService{
 		runner:        runner,
 		db:            db,
@@ -66,6 +69,7 @@ func NewDeployService(runner *exec.Runner, db *state.DB, cfg config.DeployConfig
 		docker:        docker,
 		container:     container,
 		portAllocator: portAllocator,
+		perfOptimizer: perfOptimizer,
 	}
 }
 
@@ -654,7 +658,17 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			d.broadcastPhase(deployID, "build", "Building frontend image...")
 			logToDB("stdout", "Building frontend Docker image...")
 
-			frontendDockerResult, frontendDockerErr := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-frontend", FrameworkNodeStatic, "", "", 80, envVars, frontendDir, project.OutputDir, project.ID+"-frontend")
+			// Inject generic API URL environment variables for common frontend frameworks
+			frontendEnvVars := make(map[string]string)
+			for k, v := range envVars {
+				frontendEnvVars[k] = v
+			}
+			frontendEnvVars["REACT_APP_API_URL"] = "/api"
+			frontendEnvVars["NEXT_PUBLIC_API_URL"] = "/api"
+			frontendEnvVars["VITE_API_URL"] = "/api"
+			frontendEnvVars["API_URL"] = "/api"
+
+			frontendDockerResult, frontendDockerErr := d.docker.BuildInDocker(deployCtx, project.ID, deployID+"-frontend", FrameworkNodeStatic, "", "", 80, frontendEnvVars, frontendDir, project.OutputDir, project.ID+"-frontend")
 			if frontendDockerResult != nil {
 				for _, line := range frontendDockerResult.Lines {
 					dbLog := &state.DeployLog{
@@ -684,6 +698,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				if frontendContainerErr != nil {
 					logToDB("stderr", fmt.Sprintf("Failed to start frontend container: %s", frontendContainerErr.Error()))
 					d.logger.Error("failed to start frontend container", zap.String("projectId", project.ID), zap.Error(frontendContainerErr))
+					d.failDeploy(deploy, frontendContainerErr.Error())
+					return
 				} else {
 					// Parse host port
 					var mapping struct {
@@ -783,6 +799,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				if backendContainerErr != nil {
 					logToDB("stderr", fmt.Sprintf("Failed to start backend container: %s", backendContainerErr.Error()))
 					d.logger.Error("failed to start backend container", zap.String("projectId", project.ID), zap.Error(backendContainerErr))
+					d.failDeploy(deploy, backendContainerErr.Error())
+					return
 				} else {
 					var mapping struct {
 						Host      string `json:"host"`
@@ -797,31 +815,84 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// Store backend host port on project for nginx config
 			if backendHostPort > 0 {
-				project.LocalPort = backendHostPort
-				d.db.UpdateProject(project)
+				// DO NOT overwrite LocalPort, it's the internal container port.
+				// backendHostPort is passed directly to applyNginxForDeploy
 			}
 
-			// Configure nginx for Full Stack
+			// Configure nginx for Full Stack - create separate configs for frontend and backend
 			if opts != nil && opts.EnableNginx && opts.Domain != "" {
 				logToDB("stdout", "Configuring nginx for Full Stack deployment...")
-				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, "", true, frontendHostPort, backendHostPort); err != nil {
-					logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
+
+				domain := opts.Domain
+
+				// Create frontend config
+				frontendCfg := NginxSiteConfig{
+					Domain:               domain,
+					FrontendPath:         "",
+					ProxyEnabled:         false,
+					ProxyPort:            0,
+					FrontendProxyEnabled: true, // Frontend running in Docker
+					FrontendProxyPort:    frontendHostPort,
+				}
+				frontendConfigContent := d.nginx.GenerateFrontendConfig(frontendCfg)
+				frontendConfigName := fmt.Sprintf("frontend-%s", domain)
+
+				if err := d.nginx.WriteConfig(frontendConfigName, frontendConfigContent); err != nil {
+					logToDB("stderr", fmt.Sprintf("Frontend nginx config failed: %s", err.Error()))
 				} else {
-					logToDB("stdout", fmt.Sprintf("Nginx configured: frontend at /, backend at /api (host port %d)", backendHostPort))
+					logToDB("stdout", fmt.Sprintf("Frontend nginx config written: %s", frontendConfigName))
+				}
+
+				// Create backend config
+				backendCfg := NginxSiteConfig{
+					Domain:               domain,
+					FrontendPath:         "",
+					ProxyEnabled:         true,
+					ProxyPort:            backendHostPort,
+					FrontendProxyEnabled: false,
+					FrontendProxyPort:    0,
+				}
+				backendConfigContent := d.nginx.GenerateBackendConfig(backendCfg)
+				backendConfigName := fmt.Sprintf("backend-%s", domain)
+
+				if err := d.nginx.WriteConfig(backendConfigName, backendConfigContent); err != nil {
+					logToDB("stderr", fmt.Sprintf("Backend nginx config failed: %s", err.Error()))
+				} else {
+					logToDB("stdout", fmt.Sprintf("Backend nginx config written: %s", backendConfigName))
+				}
+
+				// Test and reload nginx
+				testResult, err := d.nginx.TestConfig(deployCtx)
+				if err != nil {
+					logToDB("stderr", fmt.Sprintf("Nginx config test failed: %s", err.Error()))
+				} else if !testResult.Success {
+					logToDB("stderr", fmt.Sprintf("Nginx config test failed: %s", testResult.Output))
+				} else {
+					if err := d.nginx.Reload(deployCtx); err != nil {
+						logToDB("stderr", fmt.Sprintf("Nginx reload failed: %s", err.Error()))
+					} else {
+						logToDB("stdout", fmt.Sprintf("Nginx configured: frontend at /, backend at /api (host port %d)", backendHostPort))
+					}
 				}
 			}
 
 			// Success
 			now := time.Now()
-			buildDuration := now.Sub(buildStart).Seconds()
+			buildDuration := now.Sub(buildStart)
+			buildDurationSeconds := buildDuration.Seconds()
 			deploy.Status = "success"
 			deploy.EndedAt = &now
 			deploy.ExitCode = 0
-			deploy.BuildDuration = buildDuration
+			deploy.BuildDuration = buildDurationSecondsSeconds
 			d.db.UpdateDeploy(deploy)
 
+			// Record performance statistics for auto-optimization
+			if d.perfOptimizer != nil {
+				d.perfOptimizer.RecordBuildStats(buildDuration)
+			}
+
 			logToDB("stdout", "")
-			logToDB("stdout", fmt.Sprintf("Full Stack deployment completed successfully! (%.1fs)", buildDuration))
+			logToDB("stdout", fmt.Sprintf("Full Stack deployment completed successfully! (%.1fs)", buildDurationSeconds))
 
 			if d.broadcaster != nil {
 				d.broadcaster.BroadcastToJob(deployID, map[string]interface{}{
@@ -905,11 +976,17 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			logToDB("stdout", "Starting Docker container...")
 
 			imageName := fmt.Sprintf("opendeploy/%s:latest", project.ID)
+
+			frontendProxyPort := 0
+			backendProxyPort := 0
+
 			if d.container != nil {
 				container, containerErr := d.container.StartContainer(deployCtx, project.ID, project.Name, imageName, containerPort, envVars)
 				if containerErr != nil {
 					logToDB("stderr", fmt.Sprintf("Failed to start container: %s", containerErr.Error()))
 					d.logger.Error("failed to start container", zap.String("projectId", project.ID), zap.Error(containerErr))
+					d.failDeploy(deploy, containerErr.Error())
+					return
 				} else {
 					// Parse host port from container port mappings
 					var mapping struct {
@@ -928,46 +1005,73 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 						var hostPort int
 						fmt.Sscanf(hostPortStr, "%d", &hostPort)
 						if hostPort > 0 {
-							project.LocalPort = hostPort
-							d.db.UpdateProject(project)
+							// DO NOT overwrite LocalPort, it's the internal container port.
+							// But we need to use this mapped port for nginx below.
+							if isBackend {
+								backendProxyPort = hostPort
+							} else {
+								frontendProxyPort = hostPort
+							}
 							logToDB("stdout", fmt.Sprintf("Mapped host port %d for external access", hostPort))
 						}
 					}
 				}
 			}
 
-			// Configure nginx if domain is provided
-			if opts != nil && opts.EnableNginx && opts.Domain != "" {
+			// Configure nginx if domain or AttachToProjectID is provided
+			if opts != nil && opts.EnableNginx && (opts.Domain != "" || opts.AttachToProjectID != "") {
 				logToDB("stdout", "Configuring nginx...")
-				// Pass the host port so nginx proxies to the Docker container
-				frontendProxyPort := 0
-				var backendProxyPort int
-				if isBackend {
-					backendProxyPort = project.LocalPort
-				} else {
-					frontendProxyPort = project.LocalPort
+
+				domainToUse := opts.Domain
+				// If attaching to an existing frontend project, we create a separate backend config that shares the domain
+				if opts.AttachToProjectID != "" && isBackend {
+					frontendProj, err := d.db.GetProject(opts.AttachToProjectID)
+					if err == nil && frontendProj != nil && frontendProj.Domain != "" {
+						domainToUse = frontendProj.Domain
+						logToDB("stdout", fmt.Sprintf("Creating backend config for domain: %s", domainToUse))
+
+						// No need to fetch frontend port - the frontend has its own config
+						// We just need our backend proxy port
+					} else {
+						logToDB("stderr", "Warning: Could not find domain for attached frontend project")
+					}
 				}
-				if err := d.applyNginxForDeploy(deployCtx, project, opts.Domain, "", isBackend, frontendProxyPort, backendProxyPort); err != nil {
-					logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
-					d.logger.Error("nginx apply failed", zap.String("deployId", deployID), zap.String("domain", opts.Domain), zap.Error(err))
-				} else {
-					logToDB("stdout", fmt.Sprintf("Nginx configured for %s", opts.Domain))
+
+				if domainToUse != "" {
+					if err := d.applyNginxForDeploy(deployCtx, project, domainToUse, "", isBackend, 0, backendProxyPort); err != nil {
+						logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
+						d.logger.Error("nginx apply failed", zap.String("deployId", deployID), zap.String("domain", domainToUse), zap.Error(err))
+					} else {
+						configType := "combined"
+						if isBackend {
+							configType = "backend"
+						} else if !isBackend && frontendProxyPort > 0 {
+							configType = "frontend"
+						}
+						logToDB("stdout", fmt.Sprintf("Nginx %s config configured for %s", configType, domainToUse))
+					}
 				}
 			}
 
 			// SUCCESS
 			now := time.Now()
-			buildDuration := now.Sub(buildStart).Seconds()
+			buildDuration := now.Sub(buildStart)
+			buildDurationSeconds := buildDuration.Seconds()
+
+			// Record performance statistics for auto-optimization
+			if d.perfOptimizer != nil {
+				d.perfOptimizer.RecordBuildStats(buildDuration)
+			}
 			deploy.Status = "success"
 			deploy.EndedAt = &now
 			deploy.ExitCode = 0
-			deploy.BuildDuration = buildDuration
+			deploy.BuildDuration = buildDurationSeconds
 			d.db.UpdateDeploy(deploy)
 
-			d.logger.Info("deploy completed", zap.String("deployId", deployID), zap.String("projectId", project.ID), zap.String("framework", string(framework)), zap.Float64("buildDuration", buildDuration))
+			d.logger.Info("deploy completed", zap.String("deployId", deployID), zap.String("projectId", project.ID), zap.String("framework", string(framework)), zap.Float64("buildDuration", buildDurationSeconds))
 
 			logToDB("stdout", "")
-			logToDB("stdout", fmt.Sprintf("Deployment completed successfully! (%.1fs)", buildDuration))
+			logToDB("stdout", fmt.Sprintf("Deployment completed successfully! (%.1fs)", buildDurationSeconds))
 
 			if d.broadcaster != nil {
 				d.broadcaster.BroadcastToJob(deployID, map[string]interface{}{
@@ -1037,17 +1141,23 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// SUCCESS
 			now := time.Now()
-			buildDuration := now.Sub(buildStart).Seconds()
+			buildDuration := now.Sub(buildStart)
+			buildDurationSeconds := buildDuration.Seconds()
+
+			// Record performance statistics for auto-optimization
+			if d.perfOptimizer != nil {
+				d.perfOptimizer.RecordBuildStats(buildDuration)
+			}
 			deploy.Status = "success"
 			deploy.EndedAt = &now
 			deploy.ExitCode = 0
-			deploy.BuildDuration = buildDuration
+			deploy.BuildDuration = buildDurationSeconds
 			d.db.UpdateDeploy(deploy)
 
-			d.logger.Info("deploy completed", zap.String("deployId", deployID), zap.String("projectId", project.ID), zap.String("framework", string(framework)), zap.Float64("buildDuration", buildDuration))
+			d.logger.Info("deploy completed", zap.String("deployId", deployID), zap.String("projectId", project.ID), zap.String("framework", string(framework)), zap.Float64("buildDuration", buildDurationSeconds))
 
 			logToDB("stdout", "")
-			logToDB("stdout", fmt.Sprintf("Deployment completed successfully! (%.1fs)", buildDuration))
+			logToDB("stdout", fmt.Sprintf("Deployment completed successfully! (%.1fs)", buildDurationSeconds))
 
 			if d.broadcaster != nil {
 				d.broadcaster.BroadcastToJob(deployID, map[string]interface{}{

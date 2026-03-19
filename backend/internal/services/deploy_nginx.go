@@ -11,6 +11,7 @@ import (
 )
 
 // applyNginxForDeploy generates and applies nginx configuration after a successful deploy.
+// Creates separate config files for frontend and backend when they share the same domain.
 // frontendHostPort is the host port mapped to the frontend Docker container (0 if not applicable).
 // backendHostPort is the host port mapped to the backend Docker container (0 if not applicable).
 func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) error {
@@ -22,6 +23,20 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 	if !IsValidDomain(domain) {
 		return fmt.Errorf("invalid domain: %s", domain)
 	}
+
+	// Generate config filename based on type
+	var configName string
+	if isBackend {
+		configName = fmt.Sprintf("backend-%s", domain)
+	} else {
+		configName = fmt.Sprintf("frontend-%s", domain)
+	}
+
+	d.logger.Info("applying nginx config",
+		zap.String("domain", domain),
+		zap.String("configName", configName),
+		zap.Bool("isBackend", isBackend),
+	)
 
 	// Determine proxy settings for backend
 	var proxyEnabled bool
@@ -62,12 +77,12 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 	// Determine frontend proxy settings
 	var frontendProxyEnabled bool
 	var frontendProxyPort int
-	if frontendHostPort > 0 {
+	if !isBackend && frontendHostPort > 0 {
 		frontendProxyEnabled = true
 		frontendProxyPort = frontendHostPort
 	}
 
-	// Generate nginx config
+	// Generate nginx config for this specific type (frontend or backend)
 	siteCfg := NginxSiteConfig{
 		Domain:               domain,
 		FrontendPath:         outputPath,
@@ -76,10 +91,17 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		FrontendProxyEnabled: frontendProxyEnabled,
 		FrontendProxyPort:    frontendProxyPort,
 	}
-	configContent := d.nginx.GenerateConfig(siteCfg)
 
-	// Write config atomically
-	if err := d.nginx.WriteConfig(domain, configContent); err != nil {
+	// Generate config content based on type
+	var configContent string
+	if isBackend {
+		configContent = d.nginx.GenerateBackendConfig(siteCfg)
+	} else {
+		configContent = d.nginx.GenerateFrontendConfig(siteCfg)
+	}
+
+	// Write config atomically (use configName instead of domain)
+	if err := d.nginx.WriteConfig(configName, configContent); err != nil {
 		return fmt.Errorf("failed to write nginx config: %w", err)
 	}
 
@@ -99,6 +121,7 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 
 	d.logger.Info("nginx configured successfully",
 		zap.String("domain", domain),
+		zap.String("configName", configName),
 		zap.String("outputPath", outputPath),
 		zap.Bool("proxyEnabled", proxyEnabled),
 		zap.Int("proxyPort", proxyPort),

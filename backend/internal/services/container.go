@@ -293,7 +293,12 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 			zap.Strings("recentLogs", logs),
 		)
 
-		return container, fmt.Errorf("container started but failed health check")
+		logStr := ""
+		if len(logs) > 0 {
+			logStr = "\nContainer logs:\n" + strings.Join(logs, "\n")
+		}
+
+		return container, fmt.Errorf("container started but failed health check%s", logStr)
 	}
 
 	return container, nil

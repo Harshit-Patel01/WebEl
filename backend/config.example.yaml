@@ -10,7 +10,7 @@ database:
 deploy:
   workspace_root: "/var/lib/opendeploy/projects"
   max_concurrent_builds: 1
-  build_timeout: 30m
+  build_timeout: 60m
   git_binary: "/usr/bin/git"
   node_binary: "/usr/bin/node"
   npm_binary: "/usr/bin/npm"
