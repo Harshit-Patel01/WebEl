@@ -319,27 +319,7 @@ func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
 
 	// 1. Optimize Docker daemon configuration
 	logger.Info("Optimizing Docker daemon configuration")
-	dockerConfig := `{
-  "default-ulimits": {
-    "nofile": {
-      "Name": "nofile",
-      "Hard": 65536,
-      "Soft": 65536
-    }
-  },
-  "max-concurrent-downloads": 3,
-  "max-concurrent-uploads": 3,
-  "experimental": false,
-  "storage-driver": "overlay2",
-  "storage-opts": [
-    "overlay2.override_kernel_check=true"
-  ],
-  "cpu-count": 4,
-  "memory": "6G",
-  "cpu-shares": 1024
-}`
-
-	// Write Docker daemon config
+	// Docker config: default-ulimits, max-concurrent-downloads/uploads, storage-driver overlay2
 	_, err := runner.Run(ctx, exec.RunOpts{
 		JobType: "docker_optimize_config",
 		Command: "sudo",
@@ -369,7 +349,7 @@ func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
 
 	// 3. Optimize VM settings for better I/O
 	logger.Info("Optimizing VM settings for better I/O")
-	vmCommands := []struct{
+	vmCommands := []struct {
 		name string
 		cmd  []string
 	}{

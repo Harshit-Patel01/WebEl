@@ -175,6 +175,25 @@ export default function DeploymentsPage() {
     loadContainers(projectId)
   }
 
+  // New handlers for individual container control
+  const handleStopContainerByID = async (containerId: string) => {
+    await fetch(`/api/v1/containers/${containerId}/stop`, { method: 'POST', credentials: 'include' })
+    // Reload all containers
+    projects.forEach(p => loadContainers(p.id))
+  }
+
+  const handleRestartContainerByID = async (containerId: string) => {
+    await fetch(`/api/v1/containers/${containerId}/restart`, { method: 'POST', credentials: 'include' })
+    // Reload all containers
+    projects.forEach(p => loadContainers(p.id))
+  }
+
+  const handleRemoveContainerByID = async (containerId: string, projectId: string) => {
+    if (!confirm('Remove this container?')) return
+    await fetch(`/api/v1/projects/${projectId}/containers`, { method: 'DELETE', credentials: 'include' })
+    loadContainers(projectId)
+  }
+
   const handleViewContainerLogs = async (containerId: string) => {
     const response = await fetch(`/api/v1/containers/${containerId}/logs?lines=100`, { credentials: 'include' })
     const data = await response.json()
@@ -621,83 +640,103 @@ export default function DeploymentsPage() {
                   </div>
 
                   {/* Container Status (for backends and full stack) */}
-                  {container && (
+                  {projectContainers.length > 0 && (
                     <div className="px-6 py-4 bg-bg-primary/50 border-b border-border-dark">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2  ${container.status === 'running' ? 'bg-accent-lime animate-pulse' : container.status === 'unhealthy' ? 'bg-red-400' : 'bg-text-secondary'}`} />
-                          <span className="font-mono text-[11px] text-text-secondary">Container Status:</span>
-                          <span className={`font-mono text-[11px] font-bold ${getStatusColor(container.status)}`}>
-                            {container.status.toUpperCase()}
-                          </span>
-                          <span className="font-mono text-[10px] text-text-secondary bg-bg-secondary px-2 py-0.5 ">
-                            {container.container_id.substring(0, 12)}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                          <button
-                            onClick={() => handleViewContainerLogs(container.container_id)}
-                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
-                            title="View container logs"
-                          >
-                            <Terminal size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Logs</span>
-                          </button>
-                          {container.status === 'running' ? (
-                            <>
-                              <button
-                                onClick={() => handleRestartContainer(project.id)}
-                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
-                                title="Restart container"
-                              >
-                                <RotateCw size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Restart</span>
-                              </button>
-                              <button
-                                onClick={() => handleStopContainer(project.id)}
-                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
-                                title="Stop container"
-                              >
-                                <Square size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Stop</span>
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => handleStartContainer(project.id, container.id)}
-                              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-accent-lime text-text-dark font-mono text-[9px] sm:text-[10px] font-bold  hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
-                              title="Start container"
-                            >
-                              <Play size={11} className="flex-shrink-0" /> <span>Start</span>
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleRemoveContainer(project.id)}
-                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-bg-secondary text-text-secondary font-mono text-[9px] sm:text-[10px] border border-border-dark  hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
-                            title="Remove container"
-                          >
-                            <Trash2 size={11} className="flex-shrink-0" /> <span className="hidden xs:inline">Remove</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Port Mappings */}
-                      {container.port_mappings && (() => {
-                        try {
-                          const mapping = JSON.parse(container.port_mappings)
+                      <h4 className="font-mono text-[11px] uppercase tracking-wider text-text-secondary mb-3">
+                        Containers ({projectContainers.length})
+                      </h4>
+                      
+                      <div className="space-y-3">
+                        {projectContainers.map((container) => {
+                          const isBackend = container.name.includes('-backend')
+                          const isFrontend = container.name.includes('-frontend')
+                          const containerLabel = isBackend ? 'BACKEND' : isFrontend ? 'FRONTEND' : 'SERVICE'
+                          const labelColor = isBackend ? 'bg-blue-500' : isFrontend ? 'bg-purple-500' : 'bg-accent-lime'
+                          
                           return (
-                            <div className="flex items-center gap-2 text-[10px] font-mono">
-                              <span className="text-text-secondary">Port Mapping:</span>
-                              <span className="bg-bg-secondary px-2 py-1  border border-border-dark">
-                                <span className="text-accent-lime">Host {mapping.host}</span>
-                                <span className="text-text-secondary mx-1">→</span>
-                                <span className="text-cyan-400">Container {mapping.container}</span>
-                              </span>
-                              <span className="text-text-secondary text-[9px]">(nginx proxies to host port)</span>
+                            <div key={container.id} className="p-3 border border-border-dark bg-bg-secondary/50">
+                              {/* Container Header */}
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className={`font-mono text-[9px] ${labelColor} text-text-dark px-2 py-0.5 font-bold`}>
+                                    {containerLabel}
+                                  </span>
+                                  <div className={`w-2 h-2 ${container.status === 'running' ? 'bg-accent-lime animate-pulse' : container.status === 'unhealthy' ? 'bg-red-400' : 'bg-text-secondary'}`} />
+                                  <span className={`font-mono text-[11px] font-bold ${getStatusColor(container.status)}`}>
+                                    {container.status.toUpperCase()}
+                                  </span>
+                                  <span className="font-mono text-[10px] text-text-secondary bg-bg-primary px-2 py-0.5">
+                                    {container.container_id.substring(0, 12)}
+                                  </span>
+                                </div>
+                                
+                                {/* Port Mapping */}
+                                {container.port_mappings && (() => {
+                                  try {
+                                    const mapping = JSON.parse(container.port_mappings)
+                                    return (
+                                      <div className="flex items-center gap-2 text-[10px] font-mono">
+                                        <span className="text-text-secondary">Port:</span>
+                                        <span className="bg-bg-primary px-2 py-1 border border-border-dark">
+                                          <span className="text-accent-lime">{mapping.host}</span>
+                                          <span className="text-text-secondary mx-1">→</span>
+                                          <span className="text-cyan-400">{mapping.container}</span>
+                                        </span>
+                                      </div>
+                                    )
+                                  } catch {
+                                    return null
+                                  }
+                                })()}
+                              </div>
+                              
+                              {/* Container Actions */}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <button
+                                  onClick={() => handleViewContainerLogs(container.container_id)}
+                                  className="px-2 py-1 bg-bg-primary text-text-secondary font-mono text-[9px] border border-border-dark hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
+                                  title="View container logs"
+                                >
+                                  <Terminal size={10} /> Logs
+                                </button>
+                                {container.status === 'running' ? (
+                                  <>
+                                    <button
+                                      onClick={() => handleRestartContainerByID(container.id)}
+                                      className="px-2 py-1 bg-bg-primary text-text-secondary font-mono text-[9px] border border-border-dark hover:text-accent-lime hover:border-accent-lime transition-colors flex items-center gap-1"
+                                      title="Restart container"
+                                    >
+                                      <RotateCw size={10} /> Restart
+                                    </button>
+                                    <button
+                                      onClick={() => handleStopContainerByID(container.id)}
+                                      className="px-2 py-1 bg-bg-primary text-text-secondary font-mono text-[9px] border border-border-dark hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
+                                      title="Stop container"
+                                    >
+                                      <Square size={10} /> Stop
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => handleStartContainer(project.id, container.id)}
+                                    className="px-2 py-1 bg-accent-lime text-text-dark font-mono text-[9px] font-bold hover:bg-accent-lime-muted transition-colors flex items-center gap-1"
+                                    title="Start container"
+                                  >
+                                    <Play size={10} /> Start
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleRemoveContainerByID(container.id, project.id)}
+                                  className="px-2 py-1 bg-bg-primary text-text-secondary font-mono text-[9px] border border-border-dark hover:text-status-error hover:border-status-error transition-colors flex items-center gap-1"
+                                  title="Remove container"
+                                >
+                                  <Trash2 size={10} /> Remove
+                                </button>
+                              </div>
                             </div>
                           )
-                        } catch {
-                          return null
-                        }
-                      })()}
+                        })}
+                      </div>
                     </div>
                   )}
 
