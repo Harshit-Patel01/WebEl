@@ -281,13 +281,6 @@ func (d *DockerService) BuildInDocker(ctx context.Context, projectID, jobID stri
 
 	buildArgs = append(buildArgs, buildCtxDir)
 
-	// Enable BuildKit optimizations
-	if buildEnvVars == nil {
-		buildEnvVars = make(map[string]string)
-	}
-	buildEnvVars["DOCKER_BUILDKIT"] = "1"
-	buildEnvVars["BUILDKIT_PROGRESS"] = "plain"
-
 	d.logger.Info("building docker image",
 		zap.String("projectId", projectID),
 		zap.String("framework", string(framework)),

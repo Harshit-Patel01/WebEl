@@ -123,8 +123,8 @@ func (c *ContainerService) GetContainerPort(ctx context.Context, containerID str
 func (c *ContainerService) StartContainer(ctx context.Context, projectID, projectName, image string, containerPort int, envVars map[string]string) (*state.Container, error) {
 	containerName := fmt.Sprintf("opendeploy-%s", projectName)
 
-	// Check if container already exists
-	existingContainer, _ := c.db.GetContainerByProjectID(projectID)
+	// Check if container with this specific name already exists
+	existingContainer, _ := c.db.GetContainerByName(containerName)
 	if existingContainer != nil {
 		// Check if the container still exists in Docker
 		status, err := c.GetContainerStatus(ctx, existingContainer.ContainerID)
@@ -134,7 +134,7 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 				zap.String("projectId", projectID),
 				zap.String("containerName", existingContainer.Name),
 			)
-			c.StopContainer(ctx, projectID)
+			c.StopContainerByName(ctx, containerName)
 		}
 
 		// Remove the old container from Docker
@@ -329,6 +329,74 @@ func (c *ContainerService) StopContainer(ctx context.Context, projectID string) 
 	c.db.UpdateContainer(container)
 
 	return err
+}
+
+func (c *ContainerService) StopContainerByName(ctx context.Context, containerName string) error {
+	container, err := c.db.GetContainerByName(containerName)
+	if err != nil || container == nil {
+		return nil // No container to stop
+	}
+
+	c.logger.Info("stopping container by name",
+		zap.String("containerName", container.Name),
+	)
+
+	// Stop container (but don't remove it so it can be restarted)
+	_, err = c.runner.Run(ctx, exec.RunOpts{
+		JobType: "docker_stop",
+		Command: c.cfg.DockerBinary,
+		Args:    []string{"stop", container.ContainerID},
+		Timeout: 30 * time.Second,
+	})
+
+	// Update status in database
+	container.Status = "stopped"
+	c.db.UpdateContainer(container)
+
+	return err
+}
+
+func (c *ContainerService) RestartContainerByName(ctx context.Context, containerName string) error {
+	container, err := c.db.GetContainerByName(containerName)
+	if err != nil || container == nil {
+		return fmt.Errorf("container not found")
+	}
+
+	c.logger.Info("restarting container by name",
+		zap.String("containerName", container.Name),
+	)
+
+	// Check current status first
+	status, _ := c.GetContainerStatus(ctx, container.ContainerID)
+
+	var result *exec.ExecResult
+	if status == "exited" || status == "stopped" || status == "created" {
+		// Container is stopped, use start instead of restart
+		result, err = c.runner.Run(ctx, exec.RunOpts{
+			JobType: "docker_start",
+			Command: c.cfg.DockerBinary,
+			Args:    []string{"start", container.ContainerID},
+			Timeout: 30 * time.Second,
+		})
+	} else {
+		// Container is running, use restart
+		result, err = c.runner.Run(ctx, exec.RunOpts{
+			JobType: "docker_restart",
+			Command: c.cfg.DockerBinary,
+			Args:    []string{"restart", container.ContainerID},
+			Timeout: 30 * time.Second,
+		})
+	}
+
+	if err != nil || !result.Success {
+		return fmt.Errorf("failed to restart container")
+	}
+
+	// Update status in database
+	container.Status = "running"
+	c.db.UpdateContainer(container)
+
+	return nil
 }
 
 // RestartContainer restarts a container
