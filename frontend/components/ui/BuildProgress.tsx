@@ -3,14 +3,24 @@
 interface BuildProgressProps {
   currentPhase: number
   phases?: string[]
+  isBackend?: boolean
+  isFullStack?: boolean
 }
 
-const defaultPhases = ['Clone', 'Detect', 'Build', 'Service', 'Done']
+const defaultPhases = ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
 
-export default function BuildProgress({ currentPhase, phases = defaultPhases }: BuildProgressProps) {
+export default function BuildProgress({ currentPhase, phases, isBackend = false, isFullStack = false }: BuildProgressProps) {
+  // Use custom phases if provided, otherwise determine based on deployment type
+  const displayPhases = phases || (
+    isFullStack
+      ? ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
+      : isBackend
+        ? ['Clone', 'Detect', 'Build', 'Start', 'Done']
+        : ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
+  )
   return (
     <div className="flex items-center gap-1 w-full">
-      {phases.map((phase, i) => (
+      {displayPhases.map((phase, i) => (
         <div key={phase} className="flex items-center flex-1">
           <div className="flex flex-col items-center flex-1">
             <div className="flex items-center w-full">
@@ -29,12 +39,12 @@ export default function BuildProgress({ currentPhase, phases = defaultPhases }: 
               `}
             >
               {phase}
-              {i === currentPhase && i < phases.length - 1 && (
+              {i === currentPhase && i < displayPhases.length - 1 && (
                 <span className="animate-pulse">...</span>
               )}
             </span>
           </div>
-          {i < phases.length - 1 && (
+          {i < displayPhases.length - 1 && (
             <div className="w-2" />
           )}
         </div>
