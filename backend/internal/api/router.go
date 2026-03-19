@@ -200,6 +200,9 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Post("/projects/{id}/containers/restart", containerH.restartContainer)
 			r.Delete("/projects/{id}/containers", containerH.removeContainer)
 			r.Get("/containers/{containerId}/logs", containerH.getContainerLogs)
+			// Individual container control
+			r.Post("/containers/{containerId}/stop", containerH.stopContainerByID)
+			r.Post("/containers/{containerId}/restart", containerH.restartContainerByID)
 
 			// Deploy Logs
 			r.Get("/deploys/{deployId}/logs", deployLogH.getDeployLogs)

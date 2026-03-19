@@ -116,8 +116,8 @@ func (h *authHandlers) status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondOK(w, map[string]interface{}{
-		"password_set":   h.auth.IsPasswordSet(),
-		"authenticated":  authenticated,
+		"password_set":  h.auth.IsPasswordSet(),
+		"authenticated": authenticated,
 	})
 }
 
@@ -633,12 +633,12 @@ func (h *tunnelHandlers) stopRemoteTunnel(w http.ResponseWriter, r *http.Request
 // adoptTunnel is a handler to adopt an existing Cloudflare tunnel into OpenDeploy management
 func (h *tunnelHandlers) adoptTunnel(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TunnelID    string                    `json:"tunnel_id"`
-		TunnelToken string                    `json:"tunnel_token"`
-		AccountID   string                    `json:"account_id"`
-		ZoneID      string                    `json:"zone_id"`
-		TunnelName  string                    `json:"tunnel_name"`
-		Routes      []state.TunnelRoute       `json:"routes"`
+		TunnelID    string              `json:"tunnel_id"`
+		TunnelToken string              `json:"tunnel_token"`
+		AccountID   string              `json:"account_id"`
+		ZoneID      string              `json:"zone_id"`
+		TunnelName  string              `json:"tunnel_name"`
+		Routes      []state.TunnelRoute `json:"routes"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -852,9 +852,13 @@ func (h *deployHandlers) listDeploys(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if d.IsBackend {
-			container, err := h.db.GetContainerByProjectID(d.ProjectID)
-			if err == nil && container != nil {
-				deployMap["port_mappings"] = container.PortMappings
+			containers, err := h.db.ListContainersByProject(d.ProjectID)
+			if err == nil && containers != nil {
+				deployMap["containers"] = containers
+				// For backward compatibility, also include port_mappings from first container
+				if len(containers) > 0 {
+					deployMap["port_mappings"] = containers[0].PortMappings
+				}
 			}
 		}
 
@@ -895,9 +899,13 @@ func (h *deployHandlers) getDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if d.IsBackend {
-		container, err := h.db.GetContainerByProjectID(d.ProjectID)
-		if err == nil && container != nil {
-			response["port_mappings"] = container.PortMappings
+		containers, err := h.db.ListContainersByProject(d.ProjectID)
+		if err == nil && containers != nil {
+			response["containers"] = containers
+			// For backward compatibility, also include port_mappings from first container
+			if len(containers) > 0 {
+				response["port_mappings"] = containers[0].PortMappings
+			}
 		}
 	}
 
@@ -1560,6 +1568,40 @@ func (h *containerHandlers) getContainerLogs(w http.ResponseWriter, r *http.Requ
 	respondOK(w, map[string]interface{}{
 		"logs": logs,
 	})
+}
+
+func (h *containerHandlers) stopContainerByID(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	if err := h.service.StopContainerByName(r.Context(), container.Name); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "stopped"})
+}
+
+func (h *containerHandlers) restartContainerByID(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	if err := h.service.RestartContainerByName(r.Context(), container.Name); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "restarted"})
 }
 
 // --- Deploy Log handlers ---
