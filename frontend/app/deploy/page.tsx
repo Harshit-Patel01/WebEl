@@ -46,9 +46,8 @@ export default function DeployPage() {
   const [showBackendBulkImport, setShowBackendBulkImport] = useState(false)
   const [backendBulkContent, setBackendBulkContent] = useState('')
   const [backendBulkIsSecret, setBackendBulkIsSecret] = useState(false)
-  const [backendBulkContent, setBackendBulkContent] = useState('')
-  const [backendBulkIsSecret, setBackendBulkIsSecret] = useState(false)
   const [buildPhase, setBuildPhase] = useState(0)
+  const [frontendCompleted, setFrontendCompleted] = useState(false)
   const [currentDeployId, setCurrentDeployId] = useState<string | null>(null)
   const [deployResult, setDeployResult] = useState<{
     status: string
@@ -187,12 +186,31 @@ export default function DeployPage() {
         clone: 0, detect: 1, build: 2, service: 3, done: 4,
         install: 2, // Map install to build phase
       }
-      if (message.phase && phaseMap[message.phase] !== undefined) {
-        const newPhase = phaseMap[message.phase]
-        // Only update if the new phase is greater than or equal to current phase
-        // This prevents the timeline from going backwards
-        setBuildPhase(prev => Math.max(prev, newPhase))
-      }
+       if (message.phase && phaseMap[message.phase] !== undefined) {
+         const newPhase = phaseMap[message.phase]
+         
+         // For full-stack deployments, we need to track progress through both frontend and backend
+         if (projectType === 'full_stack') {
+           // Track what we've seen to understand the progression
+           if (newPhase === 3) { // service phase
+             // If we've already completed frontend, this is backend service
+             if (frontendCompleted) {
+               setBuildPhase(5) // backend service
+             } else {
+               setBuildPhase(3) // frontend service
+               setFrontendCompleted(true) // mark frontend as done
+             }
+           } else if (newPhase === 4 && frontendCompleted) { // done phase after frontend completed
+             setBuildPhase(6) // fully done
+           } else {
+             // Normal progression for unseen phases
+             setBuildPhase(prev => Math.max(prev, newPhase))
+           }
+         } else {
+           // For non-fullstack, simple progression
+           setBuildPhase(prev => Math.max(prev, newPhase))
+         }
+       }
     })
 
     return () => {
@@ -539,11 +557,11 @@ export default function DeployPage() {
 
             {currentDeployId && (
               <div className="mt-6">
-                <BuildProgress
-                  currentPhase={buildPhase}
-                  isBackend={projectType === 'backend'}
-                  isFullStack={projectType === 'fullstack'}
-                />
+                 <BuildProgress
+                   currentPhase={buildPhase}
+                   isBackend={projectType === 'app_service'}
+                   isFullStack={projectType === 'full_stack'}
+                 />
                 <div className="mt-4">
                   <DeployLogStream deployId={currentDeployId} maxHeight="400px" />
                 </div>
@@ -1108,137 +1126,445 @@ export default function DeployPage() {
                       Environment Variables
                     </h3>
                   </div>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="font-mono text-[10px] text-text-secondary">
-                      Configure runtime environment variables
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setShowBulkImport(!showBulkImport)}
-                        disabled={deploying}
-                        className="inline-flex items-center gap-1 font-mono text-label text-text-secondary hover:text-accent-lime transition-colors disabled:opacity-50"
-                      >
-                        <Upload size={12} /> Bulk
-                      </button>
-                      <button
-                        onClick={() => setEnvVars([...envVars, { key: '', value: '', is_secret: false, visible: true }])}
-                        disabled={deploying}
-                        className="inline-flex items-center gap-1 font-mono text-label text-accent-lime hover:text-accent-lime-muted transition-colors disabled:opacity-50"
-                      >
-                        <Plus size={12} /> Add
-                      </button>
-                    </div>
-                  </div>
 
-,
-                    <div className="mb-3 p-3 bg-bg-primary border border-border-dark ">
-                      <p className="font-mono text-[10px] text-text-secondary mb-2">
-                        Paste .env format (KEY=VALUE per line)
-                      </p>
-                      <textarea
-                        value={bulkContent}
-                        onChange={e => setBulkContent(e.target.value)}
-                        className="w-full px-3 py-2 bg-bg-secondary border border-border-dark  font-mono text-small text-text-primary mb-2"
-                        rows={4}
-                        placeholder={"DATABASE_URL=postgres://...\nAPI_KEY=abc123\nNODE_ENV=production"}
-                        spellCheck={false}
-                      />
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
-                          <input
-                            type="checkbox"
-                            checked={bulkIsSecret}
-                            onChange={e => setBulkIsSecret(e.target.checked)}
-                            className="accent-accent-lime"
-                          />
-                          <Lock size={10} /> Mark all as secret
-                        </label>
-                        <button
-                          onClick={() => {
-                            const lines = bulkContent.split('\n')
-                            const newVars = lines
-                              .map(l => l.trim())
-                              .filter(l => l && !l.startsWith('#'))
-                              .map(l => {
-                                const [key, ...rest] = l.split('=')
-                                let value = rest.join('=')
-                                if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1)
-                                if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1)
-                                return { key: key.trim(), value, is_secret: bulkIsSecret, visible: !bulkIsSecret }
-                              })
-                              .filter(v => v.key)
-                            setEnvVars([...envVars, ...newVars])
-                            setBulkContent('')
-                            setShowBulkImport(false)
-                          }}
-                          className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold "
-                        >
-                          Import
-                        </button>
+                  {projectType === 'full_stack' ? (
+                    <div className="space-y-4 mb-4">
+                      {/* Frontend Env Vars Section */}
+                      <div className="border border-border-dark rounded p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <h4 className="font-mono text-[11px] text-text-secondary mb-1">
+                              Frontend Environment Variables
+                            </h4>
+                            <p className="font-mono text-[9px] text-text-secondary">
+                              Injected into Docker build (e.g., REACT_APP_API_URL=/api)
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setShowFrontendBulkImport(!showFrontendBulkImport)}
+                              disabled={deploying}
+                              className="inline-flex items-center gap-1 font-mono text-label text-text-secondary hover:text-accent-lime transition-colors disabled:opacity-50"
+                            >
+                              <Upload size={12} /> Bulk
+                            </button>
+                            <button
+                              onClick={() => setFrontendEnvVars([...frontendEnvVars, { key: '', value: '', is_secret: false, visible: true }])}
+                              disabled={deploying}
+                              className="inline-flex items-center gap-1 font-mono text-label text-accent-lime hover:text-accent-lime-muted transition-colors disabled:opacity-50 px-3 py-1.5 bg-bg-primary border border-border-dark"
+                            >
+                              <Plus size={12} /> Add Frontend
+                            </button>
+                          </div>
+                        </div>
+
+                        {showFrontendBulkImport && (
+                          <div className="mb-3 p-3 bg-bg-primary border border-border-dark">
+                            <p className="font-mono text-[10px] text-text-secondary mb-2">
+                              Paste .env format (KEY=VALUE per line)
+                            </p>
+                            <textarea
+                              value={frontendBulkContent}
+                              onChange={e => setFrontendBulkContent(e.target.value)}
+                              className="w-full px-3 py-2 bg-bg-secondary border border-border-dark font-mono text-small text-text-primary mb-2"
+                              rows={4}
+                              placeholder={"NEXT_PUBLIC_API_URL=/api\nNODE_ENV=production"}
+                              spellCheck={false}
+                            />
+                            <div className="flex items-center justify-between">
+                              <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
+                                <input
+                                  type="checkbox"
+                                  checked={frontendBulkIsSecret}
+                                  onChange={e => setFrontendBulkIsSecret(e.target.checked)}
+                                  className="accent-accent-lime"
+                                />
+                                <Lock size={10} /> Mark all as secret
+                              </label>
+                              <button
+                                onClick={() => {
+                                  const lines = frontendBulkContent.split('\n')
+                                  const newVars = lines
+                                    .map(l => l.trim())
+                                    .filter(l => l && !l.startsWith('#'))
+                                    .map(l => {
+                                      const [key, ...rest] = l.split('=')
+                                      let value = rest.join('=')
+                                      if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1)
+                                      if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1)
+                                      return { key: key.trim(), value, is_secret: frontendBulkIsSecret, visible: !frontendBulkIsSecret }
+                                    })
+                                    .filter(v => v.key)
+                                  setFrontendEnvVars([...frontendEnvVars, ...newVars])
+                                  setFrontendBulkContent('')
+                                  setShowFrontendBulkImport(false)
+                                }}
+                                className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold"
+                              >
+                                Import
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {frontendEnvVars.length > 0 && (
+                          <div className="space-y-2 mt-4">
+                            {frontendEnvVars.map((v, i) => (
+                              <div key={`frontend-${i}`} className="flex gap-2">
+                                <input
+                                  value={v.key}
+                                  onChange={e => {
+                                    const updated = [...frontendEnvVars]
+                                    updated[i].key = e.target.value
+                                    setFrontendEnvVars(updated)
+                                  }}
+                                  disabled={deploying}
+                                  className="w-[35%] px-3 py-2 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                                  placeholder="FRONTEND_KEY"
+                                />
+                                <div className="flex-1 relative">
+                                  <input
+                                    type={v.visible ? 'text' : 'password'}
+                                    value={v.value}
+                                    onChange={e => {
+                                      const updated = [...frontendEnvVars]
+                                      updated[i].value = e.target.value
+                                      setFrontendEnvVars(updated)
+                                    }}
+                                    disabled={deploying}
+                                    className="w-full px-3 py-2 pr-8 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                                    placeholder="FRONTEND_VALUE"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      const updated = [...frontendEnvVars]
+                                      updated[i].visible = !updated[i].visible
+                                      setFrontendEnvVars(updated)
+                                    }}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                                  >
+                                    {v.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                                  </button>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const updated = [...frontendEnvVars]
+                                    updated[i].is_secret = !updated[i].is_secret
+                                    setFrontendEnvVars(updated)
+                                  }}
+                                  disabled={deploying}
+                                  className={`p-2 transition-colors ${v.is_secret ? 'text-accent-lime' : 'text-text-secondary hover:text-text-primary'}`}
+                                  title={v.is_secret ? 'Secret (encrypted)' : 'Not secret'}
+                                >
+                                  <Lock size={14} />
+                                </button>
+                                <button
+                                  onClick={() => setFrontendEnvVars(frontendEnvVars.filter((_, j) => j !== i))}
+                                  disabled={deploying}
+                                  className="p-2 text-text-secondary hover:text-status-error transition-colors disabled:opacity-50"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {frontendEnvVars.length === 0 && (
+                          <p className="font-mono text-[10px] text-text-secondary mt-2">
+                            No frontend environment variables configured
+                          </p>
+                        )}
                       </div>
+
+                      {/* Backend Env Vars Section */}
+                      <div className="border border-border-dark rounded p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <h4 className="font-mono text-[11px] text-text-secondary mb-1">
+                              Backend Environment Variables
+                            </h4>
+                            <p className="font-mono text-[9px] text-text-secondary">
+                              Available in backend runtime (e.g., DATABASE_URL, API_SECRET)
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setShowBackendBulkImport(!showBackendBulkImport)}
+                              disabled={deploying}
+                              className="inline-flex items-center gap-1 font-mono text-label text-text-secondary hover:text-accent-lime transition-colors disabled:opacity-50"
+                            >
+                              <Upload size={12} /> Bulk
+                            </button>
+                            <button
+                              onClick={() => setBackendEnvVars([...backendEnvVars, { key: '', value: '', is_secret: false, visible: true }])}
+                              disabled={deploying}
+                              className="inline-flex items-center gap-1 font-mono text-label text-accent-lime hover:text-accent-lime-muted transition-colors disabled:opacity-50 px-3 py-1.5 bg-bg-primary border border-border-dark"
+                            >
+                              <Plus size={12} /> Add Backend
+                            </button>
+                          </div>
+                        </div>
+
+                        {showBackendBulkImport && (
+                          <div className="mb-3 p-3 bg-bg-primary border border-border-dark">
+                            <p className="font-mono text-[10px] text-text-secondary mb-2">
+                              Paste .env format (KEY=VALUE per line)
+                            </p>
+                            <textarea
+                              value={backendBulkContent}
+                              onChange={e => setBackendBulkContent(e.target.value)}
+                              className="w-full px-3 py-2 bg-bg-secondary border border-border-dark font-mono text-small text-text-primary mb-2"
+                              rows={4}
+                              placeholder={"DATABASE_URL=postgres://...\nAPI_KEY=abc123\nNODE_ENV=production"}
+                              spellCheck={false}
+                            />
+                            <div className="flex items-center justify-between">
+                              <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
+                                <input
+                                  type="checkbox"
+                                  checked={backendBulkIsSecret}
+                                  onChange={e => setBackendBulkIsSecret(e.target.checked)}
+                                  className="accent-accent-lime"
+                                />
+                                <Lock size={10} /> Mark all as secret
+                              </label>
+                              <button
+                                onClick={() => {
+                                  const lines = backendBulkContent.split('\n')
+                                  const newVars = lines
+                                    .map(l => l.trim())
+                                    .filter(l => l && !l.startsWith('#'))
+                                    .map(l => {
+                                      const [key, ...rest] = l.split('=')
+                                      let value = rest.join('=')
+                                      if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1)
+                                      if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1)
+                                      return { key: key.trim(), value, is_secret: backendBulkIsSecret, visible: !backendBulkIsSecret }
+                                    })
+                                    .filter(v => v.key)
+                                  setBackendEnvVars([...backendEnvVars, ...newVars])
+                                  setBackendBulkContent('')
+                                  setShowBackendBulkImport(false)
+                                }}
+                                className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold"
+                              >
+                                Import
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {backendEnvVars.length > 0 && (
+                          <div className="space-y-2 mt-4">
+                            {backendEnvVars.map((v, i) => (
+                              <div key={`backend-${i}`} className="flex gap-2">
+                                <input
+                                  value={v.key}
+                                  onChange={e => {
+                                    const updated = [...backendEnvVars]
+                                    updated[i].key = e.target.value
+                                    setBackendEnvVars(updated)
+                                  }}
+                                  disabled={deploying}
+                                  className="w-[35%] px-3 py-2 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                                  placeholder="BACKEND_KEY"
+                                />
+                                <div className="flex-1 relative">
+                                  <input
+                                    type={v.visible ? 'text' : 'password'}
+                                    value={v.value}
+                                    onChange={e => {
+                                      const updated = [...backendEnvVars]
+                                      updated[i].value = e.target.value
+                                      setBackendEnvVars(updated)
+                                    }}
+                                    disabled={deploying}
+                                    className="w-full px-3 py-2 pr-8 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                                    placeholder="BACKEND_VALUE"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      const updated = [...backendEnvVars]
+                                      updated[i].visible = !updated[i].visible
+                                      setBackendEnvVars(updated)
+                                    }}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                                  >
+                                    {v.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                                  </button>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const updated = [...backendEnvVars]
+                                    updated[i].is_secret = !updated[i].is_secret
+                                    setBackendEnvVars(updated)
+                                  }}
+                                  disabled={deploying}
+                                  className={`p-2 transition-colors ${v.is_secret ? 'text-accent-lime' : 'text-text-secondary hover:text-text-primary'}`}
+                                  title={v.is_secret ? 'Secret (encrypted)' : 'Not secret'}
+                                >
+                                  <Lock size={14} />
+                                </button>
+                                <button
+                                  onClick={() => setBackendEnvVars(backendEnvVars.filter((_, j) => j !== i))}
+                                  disabled={deploying}
+                                  className="p-2 text-text-secondary hover:text-status-error transition-colors disabled:opacity-50"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {backendEnvVars.length === 0 && (
+                          <p className="font-mono text-[10px] text-text-secondary mt-2">
+                            No backend environment variables configured
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="font-mono text-[10px] text-text-secondary">
+                          Configure runtime environment variables
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowBulkImport(!showBulkImport)}
+                            disabled={deploying}
+                            className="inline-flex items-center gap-1 font-mono text-label text-text-secondary hover:text-accent-lime transition-colors disabled:opacity-50"
+                          >
+                            <Upload size={12} /> Bulk
+                          </button>
+                          <button
+                            onClick={() => setEnvVars([...envVars, { key: '', value: '', is_secret: false, visible: true }])}
+                            disabled={deploying}
+                            className="inline-flex items-center gap-1 font-mono text-label text-accent-lime hover:text-accent-lime-muted transition-colors disabled:opacity-50"
+                          >
+                            <Plus size={12} /> Add
+                          </button>
+                        </div>
+                      </div>
+
+                      {showBulkImport && (
+                        <div className="mb-3 p-3 bg-bg-primary border border-border-dark">
+                          <p className="font-mono text-[10px] text-text-secondary mb-2">
+                            Paste .env format (KEY=VALUE per line)
+                          </p>
+                          <textarea
+                            value={bulkContent}
+                            onChange={e => setBulkContent(e.target.value)}
+                            className="w-full px-3 py-2 bg-bg-secondary border border-border-dark font-mono text-small text-text-primary mb-2"
+                            rows={4}
+                            placeholder={"DATABASE_URL=postgres://...\nAPI_KEY=abc123\nNODE_ENV=production"}
+                            spellCheck={false}
+                          />
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 font-mono text-[11px] text-text-secondary">
+                              <input
+                                type="checkbox"
+                                checked={bulkIsSecret}
+                                onChange={e => setBulkIsSecret(e.target.checked)}
+                                className="accent-accent-lime"
+                              />
+                              <Lock size={10} /> Mark all as secret
+                            </label>
+                            <button
+                              onClick={() => {
+                                const lines = bulkContent.split('\n')
+                                const newVars = lines
+                                  .map(l => l.trim())
+                                  .filter(l => l && !l.startsWith('#'))
+                                  .map(l => {
+                                    const [key, ...rest] = l.split('=')
+                                    let value = rest.join('=')
+                                    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1)
+                                    if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1)
+                                    return { key: key.trim(), value, is_secret: bulkIsSecret, visible: !bulkIsSecret }
+                                  })
+                                  .filter(v => v.key)
+                                setEnvVars([...envVars, ...newVars])
+                                setBulkContent('')
+                                setShowBulkImport(false)
+                              }}
+                              className="px-3 py-1.5 bg-accent-lime text-text-dark font-mono text-[11px] font-bold"
+                            >
+                              Import
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {envVars.length > 0 && (
+                        <div className="space-y-2">
+                          {envVars.map((v, i) => (
+                            <div key={i} className="flex gap-2 mb-2">
+                              <input
+                                value={v.key}
+                                onChange={e => {
+                                  const updated = [...envVars]
+                                  updated[i].key = e.target.value
+                                  setEnvVars(updated)
+                                }}
+                                disabled={deploying}
+                                className="w-[35%] px-3 py-2 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                                placeholder="KEY"
+                              />
+                              <div className="flex-1 relative">
+                                <input
+                                  type={v.visible ? 'text' : 'password'}
+                                  value={v.value}
+                                  onChange={e => {
+                                    const updated = [...envVars]
+                                    updated[i].value = e.target.value
+                                    setEnvVars(updated)
+                                  }}
+                                  disabled={deploying}
+                                  className="w-full px-3 py-2 pr-8 bg-bg-primary border border-border-dark font-mono text-small text-text-primary disabled:opacity-50"
+                                  placeholder="VALUE"
+                                />
+                                <button
+                                  onClick={() => {
+                                    const updated = [...envVars]
+                                    updated[i].visible = !updated[i].visible
+                                    setEnvVars(updated)
+                                  }}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                                >
+                                  {v.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                                </button>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const updated = [...envVars]
+                                  updated[i].is_secret = !updated[i].is_secret
+                                  setEnvVars(updated)
+                                }}
+                                disabled={deploying}
+                                className={`p-2 transition-colors ${v.is_secret ? 'text-accent-lime' : 'text-text-secondary hover:text-text-primary'}`}
+                                title={v.is_secret ? 'Secret (encrypted)' : 'Not secret'}
+                              >
+                                <Lock size={14} />
+                              </button>
+                              <button
+                                onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}
+                                disabled={deploying}
+                                className="p-2 text-text-secondary hover:text-status-error transition-colors disabled:opacity-50"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {envVars.length === 0 && (
+                        <p className="font-mono text-[10px] text-text-secondary">
+                          No environment variables configured
+                        </p>
+                      )}
                     </div>
                   )}
-
-                  {envVars.map((v, i) => (
-                    <div key={i} className="flex gap-2 mb-2">
-                      <input
-                        value={v.key}
-                        onChange={e => {
-                          const updated = [...envVars]
-                          updated[i].key = e.target.value
-                          setEnvVars(updated)
-                        }}
-                        disabled={deploying}
-                        className="w-[35%] px-3 py-2 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50"
-                        placeholder="KEY"
-                      />
-                      <div className="flex-1 relative">
-                        <input
-                          type={v.visible ? 'text' : 'password'}
-                          value={v.value}
-                          onChange={e => {
-                            const updated = [...envVars]
-                            updated[i].value = e.target.value
-                            setEnvVars(updated)
-                          }}
-                          disabled={deploying}
-                          className="w-full px-3 py-2 pr-8 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50"
-                          placeholder="VALUE"
-                        />
-                        <button
-                          onClick={() => {
-                            const updated = [...envVars]
-                            updated[i].visible = !updated[i].visible
-                            setEnvVars(updated)
-                          }}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                        >
-                          {v.visible ? <Eye size={12} /> : <EyeOff size={12} />}
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const updated = [...envVars]
-                          updated[i].is_secret = !updated[i].is_secret
-                          setEnvVars(updated)
-                        }}
-                        disabled={deploying}
-                        className={`p-2 transition-colors ${v.is_secret ? 'text-accent-lime' : 'text-text-secondary hover:text-text-primary'}`}
-                        title={v.is_secret ? 'Secret (encrypted)' : 'Not secret'}
-                      >
-                        <Lock size={14} />
-                      </button>
-                      <button
-                        onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}
-                        disabled={deploying}
-                        className="p-2 text-text-secondary hover:text-status-error transition-colors disabled:opacity-50"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Frontend Backend Env Vars handlers for full-stack - will be conditionally rendered */}
                 </div>
 
                 {/* Deploy Button */}
