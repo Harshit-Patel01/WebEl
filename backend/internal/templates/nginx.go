@@ -29,7 +29,7 @@ const nginxTemplate = `server {
 
 {{- if .FrontendProxyEnabled}}
 
-    # Frontend - reverse proxy to Docker container
+    # Frontend - reverse proxy to container
     location / {
         proxy_pass http://localhost:{{.FrontendProxyPort}};
         proxy_http_version 1.1;
@@ -122,7 +122,7 @@ const frontendTemplate = `server {
 
 {{- if .FrontendProxyEnabled}}
 
-    # Frontend - reverse proxy to Docker container
+    # Frontend - reverse proxy to container
     location / {
         proxy_pass http://localhost:{{.FrontendProxyPort}};
         proxy_http_version 1.1;
