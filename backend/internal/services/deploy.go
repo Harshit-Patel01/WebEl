@@ -1237,16 +1237,23 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 				// Create OpenRC service file for the backend
 				serviceName := "opendeploy-app"
+				// Build the full start command: cd to workdir, then run the start command
+				fullStartCommand := fmt.Sprintf("cd %s && %s", workDir, startCmd)
+
 				serviceFile := fmt.Sprintf(`#!/sbin/openrc-run
 
-command="%s"
-command_args="%s"
-command_background=true
+name="opendeploy-app"
+description="OpenDeploy Application"
+command="sh"
+command_args="-c '%s'"
+command_background="yes"
 pidfile="/run/${RC_SVCNAME}.pid"
-directory="%s"
+output_log="/var/log/opendeploy-app.log"
+error_log="/var/log/opendeploy-app.err"
+
 # Auto-restart on exit
-: ${respawn_delay:=5}
-`, startCmd, project.LocalPort, workDir)
+respawn_delay=5
+`, fullStartCommand)
 
 				// Write the OpenRC service file
 				writeServiceCmd := fmt.Sprintf("cat > /etc/init.d/%s << 'EOF'\n%s\nEOF", serviceName, serviceFile)
@@ -1256,14 +1263,20 @@ directory="%s"
 				chmodCmd := fmt.Sprintf("chmod +x /etc/init.d/%s", serviceName)
 				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, chmodCmd)
 
+				logToDB("stdout", "Enabling OpenRC service...")
 				// Enable the service
 				enableCmd := fmt.Sprintf("rc-update add %s default", serviceName)
-				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, enableCmd)
+				enableResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, enableCmd)
+				if enableResult != nil {
+					for _, line := range enableResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
 
 				// Start the service
 				logToDB("stdout", "Starting backend service with OpenRC...")
-				startCmd := fmt.Sprintf("rc-service %s start", serviceName)
-				startResult, startErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, startCmd)
+				startSVC := fmt.Sprintf("rc-service %s start", serviceName)
+				startResult, startErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, startSVC)
 				if startResult != nil {
 					for _, line := range startResult.Lines {
 						logToDB(line.Stream, line.Text)
@@ -1274,7 +1287,7 @@ directory="%s"
 					d.failDeploy(deploy, "Failed to start service")
 					return
 				}
-				logToDB("stdout", "Service started with OpenRC and configured for auto-restart")
+				logToDB("stdout", "Service started successfully with auto-restart enabled")
 			} else {
 				// For frontend, configure nginx (already installed)
 				d.broadcastPhase(deployID, "service", "Configuring nginx...")
