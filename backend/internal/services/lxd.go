@@ -124,7 +124,7 @@ func GetDefaultStartCommand(framework FrameworkType, port int) string {
 	case FrameworkRemix:
 		return fmt.Sprintf("npm run start -- --port %d", port)
 	default:
-		return fmt.Sprintf("npm start")
+		return "npm start"
 	}
 }
 

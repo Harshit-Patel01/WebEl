@@ -229,7 +229,7 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 
 	// Helper to log build output to database for historical viewing
 	// (real-time WS broadcasting is handled by the Runner via BroadcastJobID)
-	logBuildOutput := func(result *exec.ExecResult, phase string) {
+	logBuildOutput := func(result *exec.ExecResult) {
 		if result != nil {
 			for _, line := range result.Lines {
 				log := &state.DeployLog{
@@ -279,7 +279,7 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 	})
 
 	// Log install output
-	logBuildOutput(installResult, "install")
+	logBuildOutput(installResult)
 
 	if err != nil || !installResult.Success {
 		return installResult, fmt.Errorf("npm install failed")
@@ -343,7 +343,7 @@ func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, bu
 	})
 
 	// Log build output
-	logBuildOutput(buildResult, "build")
+	logBuildOutput(buildResult)
 
 	if err != nil || !buildResult.Success {
 		return buildResult, fmt.Errorf("npm build failed")
