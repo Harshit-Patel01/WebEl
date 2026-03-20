@@ -80,7 +80,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	jobH := &jobHandlers{db: db, runner: runner}
 	envH := &envHandlers{db: db}
 	internetH := &internetHandlers{service: internetSvc}
-	containerH := &containerHandlers{service: containerSvc, db: db}
+	containerH := &containerHandlers{service: containerSvc, db: db, lxd: lxdSvc}
 	deployLogH := &deployLogHandlers{db: db}
 	sseH := &sseHandlers{db: db, logger: logger}
 	cleanupH := &cleanupHandlers{service: cleanupSvc}
@@ -202,9 +202,16 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Post("/projects/{id}/containers/restart", containerH.restartContainer)
 			r.Delete("/projects/{id}/containers", containerH.removeContainer)
 			r.Get("/containers/{containerId}/logs", containerH.getContainerLogs)
+			r.Get("/containers/{containerId}/status", containerH.getContainerStatus)
 			// Individual container control
 			r.Post("/containers/{containerId}/stop", containerH.stopContainerByID)
 			r.Post("/containers/{containerId}/restart", containerH.restartContainerByID)
+			// Application service control (inside container)
+			r.Post("/containers/{containerId}/service/start", containerH.startAppService)
+			r.Post("/containers/{containerId}/service/stop", containerH.stopAppService)
+			r.Post("/containers/{containerId}/service/restart", containerH.restartAppService)
+			r.Get("/containers/{containerId}/service/status", containerH.getAppServiceStatus)
+			r.Get("/containers/{containerId}/service/logs", containerH.getAppServiceLogs)
 
 			// Deploy Logs
 			r.Get("/deploys/{deployId}/logs", deployLogH.getDeployLogs)

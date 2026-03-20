@@ -1484,6 +1484,7 @@ func (h *envHandlers) bulkImport(w http.ResponseWriter, r *http.Request) {
 type containerHandlers struct {
 	service *services.ContainerService
 	db      *state.DB
+	lxd     *services.LXDService
 }
 
 func (h *containerHandlers) listContainers(w http.ResponseWriter, r *http.Request) {
@@ -1602,6 +1603,143 @@ func (h *containerHandlers) restartContainerByID(w http.ResponseWriter, r *http.
 	}
 
 	respondOK(w, map[string]string{"status": "restarted"})
+}
+
+// Application service handlers (inside container)
+
+func (h *containerHandlers) getContainerStatus(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	// Get real container status from LXD
+	lxdStatus, err := h.service.GetContainerStatus(r.Context(), container.ContainerID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Get application service status inside container
+	serviceStatus := "unknown"
+	if h.lxd != nil {
+		svcStatus, svcErr := h.lxd.GetAppServiceStatus(r.Context(), container.ContainerID)
+		if svcErr == nil {
+			serviceStatus = svcStatus
+		}
+	}
+
+	respondOK(w, map[string]interface{}{
+		"containerID":    container.ContainerID,
+		"containerName":  container.Name,
+		"containerStatus": lxdStatus,
+		"serviceStatus":   serviceStatus,
+		"portMappings":   container.PortMappings,
+		"status":         container.Status,
+	})
+}
+
+func (h *containerHandlers) getAppServiceStatus(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	serviceStatus, err := h.lxd.GetAppServiceStatus(r.Context(), container.ContainerID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{
+		"status": serviceStatus,
+		"containerID": container.ContainerID,
+	})
+}
+
+func (h *containerHandlers) startAppService(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	if err := h.lxd.StartAppService(r.Context(), container.ContainerID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "started"})
+}
+
+func (h *containerHandlers) stopAppService(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	if err := h.lxd.StopAppService(r.Context(), container.ContainerID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "stopped"})
+}
+
+func (h *containerHandlers) restartAppService(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	if err := h.lxd.RestartAppService(r.Context(), container.ContainerID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{"status": "restarted"})
+}
+
+func (h *containerHandlers) getAppServiceLogs(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+	lines := 100
+
+	if q := r.URL.Query().Get("lines"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil {
+			lines = n
+		}
+	}
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	logs, err := h.lxd.GetAppServiceLogs(r.Context(), container.ContainerID, lines)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{
+		"logs": logs,
+		"containerID": container.ContainerID,
+	})
 }
 
 // --- Deploy Log handlers ---
