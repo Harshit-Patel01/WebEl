@@ -85,7 +85,7 @@ func (p *PerformanceOptimizer) autoOptimize() {
 		return
 	}
 
-	p.logger.Info("Auto-optimizing Docker and system performance",
+	p.logger.Info("Auto-optimizing LXD and system performance",
 		zap.Int("total_builds", p.stats.TotalBuilds),
 		zap.Float64("avg_time", p.stats.AverageTime),
 	)
@@ -93,14 +93,14 @@ func (p *PerformanceOptimizer) autoOptimize() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// 1. Clean up Docker cache and system
-	p.cleanupDocker(ctx)
+	// 1. Clean up LXD cache and system
+	p.cleanupLXD(ctx)
 
 	// 2. Optimize system settings
 	p.optimizeSystem(ctx)
 
-	// 3. Increase Docker resources if needed
-	p.increaseDockerResources(ctx)
+	// 3. Ensure LXD is properly configured
+	p.ensureLXDConfiguration(ctx)
 
 	p.stats.Optimizations++
 	p.stats.LastOptimized = time.Now().Format(time.RFC3339)
@@ -110,28 +110,31 @@ func (p *PerformanceOptimizer) autoOptimize() {
 	)
 }
 
-func (p *PerformanceOptimizer) cleanupDocker(ctx context.Context) {
-	// Prune Docker system
-	_, err := p.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_prune",
-		Command: "docker",
-		Args:    []string{"system", "prune", "-f"},
+func (p *PerformanceOptimizer) cleanupLXD(ctx context.Context) {
+
+	// List all containers to see what's running
+	result, err := p.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_list_all",
+		Command: "lxc",
+		Args:    []string{"list", "--format", "csv", "--columns", "n,st"},
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		p.logger.Warn("Failed to prune Docker system", zap.Error(err))
+		p.logger.Warn("Failed to list LXD containers", zap.Error(err))
 	}
 
-	// Clean up build cache
-	_, err = p.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_buildx_prune",
-		Command: "docker",
-		Args:    []string{"buildx", "prune", "-f"},
-		Timeout: 30 * time.Second,
-	})
-	if err != nil {
-		p.logger.Warn("Failed to prune Docker buildx cache", zap.Error(err))
+	// For now, just log the container count for diagnostics
+	activeContainers := 0
+	if result != nil && result.Success {
+		for _, line := range result.Lines {
+			if line.Stream == "stdout" && strings.TrimSpace(line.Text) != "" {
+				activeContainers++
+			}
+		}
 	}
+	p.logger.Info("LXD cleanup diagnostics",
+		zap.Int("active_containers", activeContainers),
+	)
 }
 
 func (p *PerformanceOptimizer) optimizeSystem(ctx context.Context) {
@@ -160,7 +163,7 @@ func (p *PerformanceOptimizer) optimizeSystem(ctx context.Context) {
 	}
 }
 
-func (p *PerformanceOptimizer) increaseDockerResources(ctx context.Context) {
+func (p *PerformanceOptimizer) ensureLXDConfiguration(ctx context.Context) {
 	// Get system memory
 	memResult, err := p.runner.Run(ctx, exec.RunOpts{
 		JobType: "check_memory",
@@ -170,56 +173,37 @@ func (p *PerformanceOptimizer) increaseDockerResources(ctx context.Context) {
 	})
 
 	if err == nil && memResult != nil {
+		totalMemoryGB := 0.0 // Default value
 		for _, line := range memResult.Lines {
 			if strings.Contains(line.Text, "Mem:") {
 				parts := strings.Fields(line.Text)
 				if len(parts) >= 2 {
 					memStr := strings.TrimSuffix(parts[1], "G")
-					if mem, err := strconv.Atoi(memStr); err == nil {
-						// Set Docker memory to 75% of total RAM
-						dockerMem := fmt.Sprintf("%dG", int(float64(mem)*0.75))
-
-						// Update Docker daemon.json
-						daemonConfig := fmt.Sprintf(`{
-  "default-ulimits": {
-    "nofile": {
-      "Name": "nofile",
-      "Hard": 65536,
-      "Soft": 65536
-    }
-  },
-  "max-concurrent-downloads": 3,
-  "max-concurrent-uploads": 3,
-  "memory": "%s",
-  "cpu-count": 4,
-  "cpu-shares": 1024
-}`, dockerMem)
-
-						_, err := p.runner.Run(ctx, exec.RunOpts{
-							JobType: "update_docker_config",
-							Command: "sudo",
-							Args:    []string{"bash", "-c", fmt.Sprintf("echo '%s' > /etc/docker/daemon.json", daemonConfig)},
-							Timeout: 10 * time.Second,
-						})
-						if err != nil {
-							p.logger.Warn("Failed to update Docker config", zap.Error(err))
-						}
+					if mem, err := strconv.ParseFloat(memStr, 64); err == nil {
+						totalMemoryGB = mem
+						break
 					}
-					break
 				}
 			}
 		}
+
+		// Log memory information for diagnostics
+		p.logger.Info("System memory information",
+			zap.Float64("total_gb", totalMemoryGB),
+		)
 	}
 
-	// Restart Docker
+	// Ensure LXD daemon is running and properly configured
 	_, err = p.runner.Run(ctx, exec.RunOpts{
-		JobType: "restart_docker_optimized",
+		JobType: "check_lxd_status",
 		Command: "sudo",
-		Args:    []string{"systemctl", "restart", "docker"},
-		Timeout: 30 * time.Second,
+		Args:    []string{"systemctl", "start", "lxd"},
+		Timeout: 10 * time.Second,
 	})
 	if err != nil {
-		p.logger.Warn("Failed to restart Docker", zap.Error(err))
+		p.logger.Warn("Failed to ensure LXD is running", zap.Error(err))
+	} else {
+		p.logger.Info("LXD service ensured to be running")
 	}
 }
 

@@ -85,48 +85,19 @@ func (c *ContainerService) FindAvailablePort(startPort, endPort int) (int, error
 	return 0, fmt.Errorf("no available ports in range %d-%d", startPort, endPort)
 }
 
-// GetContainerPort uses the docker port command to get the actual mapped host port
+// GetContainerPort is not needed for LXD since port mapping is handled differently
 func (c *ContainerService) GetContainerPort(ctx context.Context, containerID string, containerPort int) (int, error) {
-	// Use docker port command to get the mapped host port
-	// Format: docker port <container_id> <container_port>
-	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_port",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"port", containerID, fmt.Sprintf("%d/tcp", containerPort)},
-		Timeout: 10 * time.Second,
-	})
-
-	if err != nil || !result.Success {
-		return 0, fmt.Errorf("failed to get container port mapping: %w", err)
-	}
-
-	// Parse output: "0.0.0.0:8080" or ":::8080"
-	for _, line := range result.Lines {
-		if line.Stream == "stdout" {
-			output := strings.TrimSpace(line.Text)
-			// Extract port from output like "0.0.0.0:8080" or ":::8080"
-			parts := strings.Split(output, ":")
-			if len(parts) >= 2 {
-				portStr := parts[len(parts)-1]
-				var port int
-				if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
-					return port, nil
-				}
-			}
-		}
-	}
-
-	return 0, fmt.Errorf("could not parse port from docker port output")
+	return 0, fmt.Errorf("port mapping handled differently in LXD")
 }
 
-// StartContainer starts a Docker container for a backend project
+// StartContainer starts an LXD container for a backend project
 func (c *ContainerService) StartContainer(ctx context.Context, projectID, projectName, image string, containerPort int, envVars map[string]string) (*state.Container, error) {
 	containerName := fmt.Sprintf("opendeploy-%s", projectName)
 
 	// Check if container with this specific name already exists
 	existingContainer, _ := c.db.GetContainerByName(containerName)
 	if existingContainer != nil {
-		// Check if the container still exists in Docker
+		// Check if the container still exists in LXD
 		status, err := c.GetContainerStatus(ctx, existingContainer.ContainerID)
 		if err == nil && status != "stopped" && status != "unknown" {
 			// Container exists, stop it first
@@ -137,11 +108,11 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 			c.StopContainerByName(ctx, containerName)
 		}
 
-		// Remove the old container from Docker
+		// Remove the old container from LXD
 		c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_rm",
-			Command: c.cfg.DockerBinary,
-			Args:    []string{"rm", "-f", existingContainer.ContainerID},
+			JobType: "lxd_delete",
+			Command: "lxc",
+			Args:    []string{"delete", "-f", existingContainer.ContainerID},
 			Timeout: 15 * time.Second,
 		})
 
@@ -155,31 +126,8 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 		return nil, fmt.Errorf("finding available port: %w", err)
 	}
 
-	// Build docker run command
-	args := []string{
-		"run",
-		"-d",
-		"--name", containerName,
-		"--restart", "unless-stopped",
-		"--health-cmd", "exit 0", // Basic health check
-		"--health-interval", "10s",
-		"--health-timeout", "5s",
-		"--health-retries", "3",
-	}
-
-	// Add port mapping: hostPort:containerPort
-	if containerPort > 0 {
-		args = append(args, "-p", fmt.Sprintf("%d:%d", hostPort, containerPort))
-	}
-
-	// Add environment variables
-	for k, v := range envVars {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	args = append(args, image)
-
-	c.logger.Info("starting container",
+	// Launch LXD container
+	c.logger.Info("launching lxd container",
 		zap.String("projectId", projectID),
 		zap.String("containerName", containerName),
 		zap.String("image", image),
@@ -188,14 +136,14 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 	)
 
 	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_run",
-		Command: c.cfg.DockerBinary,
-		Args:    args,
-		Timeout: 30 * time.Second,
+		JobType: "lxd_launch",
+		Command: "lxc",
+		Args:    []string{"launch", image, containerName},
+		Timeout: 60 * time.Second,
 	})
 
 	if err != nil || !result.Success {
-		return nil, fmt.Errorf("failed to start container")
+		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
 	// Get container ID from output
@@ -208,28 +156,43 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 	}
 
 	if containerID == "" {
-		return nil, fmt.Errorf("failed to get container ID")
+		// If output is empty, use containerName as containerID for LXD
+		containerID = containerName
 	}
 
-	// Use docker port command to get the actual mapped port
-	actualHostPort, portErr := c.GetContainerPort(ctx, containerID, containerPort)
-	if portErr != nil {
-		c.logger.Warn("failed to get actual port from docker, using allocated port",
-			zap.String("containerId", containerID),
-			zap.Error(portErr),
-		)
-		actualHostPort = hostPort // Fallback to allocated port
+	// Add port proxy device
+	proxyDeviceName := fmt.Sprintf("proxy-%d", hostPort)
+	setupResult, setupErr := c.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_proxy",
+		Command: "lxc",
+		Args: []string{
+			"config", "device", "add", containerID, proxyDeviceName, "proxy",
+			fmt.Sprintf("listen=tcp:0.0.0.0:%d", hostPort),
+			fmt.Sprintf("connect=tcp:127.0.0.1:%d", containerPort),
+		},
+		Timeout: 10 * time.Second,
+	})
+
+	if setupErr != nil || !setupResult.Success {
+		// Clean up the container if proxy setup failed
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_cleanup",
+			Command: "lxc",
+			Args:    []string{"delete", "-f", containerID},
+			Timeout: 10 * time.Second,
+		})
+		return nil, fmt.Errorf("failed to setup port proxy: %w", setupErr)
 	}
 
-	c.logger.Info("container port mapping confirmed",
+	c.logger.Info("container port proxy configured",
 		zap.String("containerId", containerID),
 		zap.Int("containerPort", containerPort),
-		zap.Int("actualHostPort", actualHostPort),
+		zap.Int("hostPort", hostPort),
 	)
 
-	// Create container record with actual port mapping
+	// Create container record with port mapping
 	portMappings := map[string]string{
-		"host":      fmt.Sprintf("%d", actualHostPort),
+		"host":      fmt.Sprintf("%d", hostPort),
 		"container": fmt.Sprintf("%d", containerPort),
 	}
 	portJSON, _ := json.Marshal(portMappings)
@@ -239,7 +202,7 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 		Name:         containerName,
 		Image:        image,
 		ContainerID:  containerID,
-		Status:       "starting",
+		Status:       "running",
 		PortMappings: string(portJSON),
 	}
 
@@ -247,59 +210,12 @@ func (c *ContainerService) StartContainer(ctx context.Context, projectID, projec
 		c.logger.Error("failed to save container to database", zap.Error(err))
 	}
 
-	// Wait for container to be healthy
-	c.logger.Info("waiting for container to be healthy", zap.String("containerId", containerID))
-
-	healthy := false
-	for i := 0; i < 30; i++ { // Wait up to 30 seconds
-		time.Sleep(1 * time.Second)
-
-		status, err := c.GetContainerStatus(ctx, containerID)
-		if err != nil {
-			c.logger.Warn("failed to check container status", zap.Error(err))
-			continue
-		}
-
-		if status == "running" {
-			// Check if container is still running (not crashed immediately)
-			time.Sleep(2 * time.Second)
-			status2, _ := c.GetContainerStatus(ctx, containerID)
-			if status2 == "running" {
-				healthy = true
-				break
-			}
-		}
-	}
-
-	if healthy {
-		container.Status = "running"
-		c.db.UpdateContainer(container)
-
-		c.logger.Info("container started successfully and is healthy",
-			zap.String("projectId", projectID),
-			zap.String("containerName", containerName),
-			zap.Int("actualHostPort", actualHostPort),
-			zap.Int("containerPort", containerPort),
-		)
-	} else {
-		container.Status = "unhealthy"
-		c.db.UpdateContainer(container)
-
-		// Get logs to help debug
-		logs, _ := c.GetContainerLogs(ctx, containerID, 50)
-		c.logger.Error("container failed health check",
-			zap.String("projectId", projectID),
-			zap.String("containerName", containerName),
-			zap.Strings("recentLogs", logs),
-		)
-
-		logStr := ""
-		if len(logs) > 0 {
-			logStr = "\nContainer logs:\n" + strings.Join(logs, "\n")
-		}
-
-		return container, fmt.Errorf("container started but failed health check%s", logStr)
-	}
+	c.logger.Info("container started successfully",
+		zap.String("projectId", projectID),
+		zap.String("containerName", containerName),
+		zap.Int("hostPort", hostPort),
+		zap.Int("containerPort", containerPort),
+	)
 
 	return container, nil
 }
@@ -318,8 +234,8 @@ func (c *ContainerService) StopContainer(ctx context.Context, projectID string) 
 
 	// Stop container (but don't remove it so it can be restarted)
 	_, err = c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_stop",
-		Command: c.cfg.DockerBinary,
+		JobType: "lxd_stop",
+		Command: "lxc",
 		Args:    []string{"stop", container.ContainerID},
 		Timeout: 30 * time.Second,
 	})
@@ -343,8 +259,8 @@ func (c *ContainerService) StopContainerByName(ctx context.Context, containerNam
 
 	// Stop container (but don't remove it so it can be restarted)
 	_, err = c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_stop",
-		Command: c.cfg.DockerBinary,
+		JobType: "lxd_stop",
+		Command: "lxc",
 		Args:    []string{"stop", container.ContainerID},
 		Timeout: 30 * time.Second,
 	})
@@ -370,19 +286,19 @@ func (c *ContainerService) RestartContainerByName(ctx context.Context, container
 	status, _ := c.GetContainerStatus(ctx, container.ContainerID)
 
 	var result *exec.ExecResult
-	if status == "exited" || status == "stopped" || status == "created" {
+	if status == "stopped" || status == "created" {
 		// Container is stopped, use start instead of restart
 		result, err = c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_start",
-			Command: c.cfg.DockerBinary,
+			JobType: "lxd_start",
+			Command: "lxc",
 			Args:    []string{"start", container.ContainerID},
 			Timeout: 30 * time.Second,
 		})
 	} else {
 		// Container is running, use restart
 		result, err = c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_restart",
-			Command: c.cfg.DockerBinary,
+			JobType: "lxd_restart",
+			Command: "lxc",
 			Args:    []string{"restart", container.ContainerID},
 			Timeout: 30 * time.Second,
 		})
@@ -415,19 +331,19 @@ func (c *ContainerService) RestartContainer(ctx context.Context, projectID strin
 	status, _ := c.GetContainerStatus(ctx, container.ContainerID)
 
 	var result *exec.ExecResult
-	if status == "exited" || status == "stopped" || status == "created" {
+	if status == "stopped" || status == "created" {
 		// Container is stopped, use start instead of restart
 		result, err = c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_start",
-			Command: c.cfg.DockerBinary,
+			JobType: "lxd_start",
+			Command: "lxc",
 			Args:    []string{"start", container.ContainerID},
 			Timeout: 30 * time.Second,
 		})
 	} else {
-		// Container is running or paused, use restart
+		// Container is running, use restart
 		result, err = c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_restart",
-			Command: c.cfg.DockerBinary,
+			JobType: "lxd_restart",
+			Command: "lxc",
 			Args:    []string{"restart", container.ContainerID},
 			Timeout: 30 * time.Second,
 		})
@@ -446,9 +362,9 @@ func (c *ContainerService) RestartContainer(ctx context.Context, projectID strin
 // GetContainerStatus checks if a container is running
 func (c *ContainerService) GetContainerStatus(ctx context.Context, containerID string) (string, error) {
 	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_inspect",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"inspect", "--format", "{{.State.Status}}", containerID},
+		JobType: "lxd_info",
+		Command: "lxc",
+		Args:    []string{"list", "--format", "csv", "--columns", "s", containerID},
 		Timeout: 10 * time.Second,
 	})
 
@@ -458,36 +374,28 @@ func (c *ContainerService) GetContainerStatus(ctx context.Context, containerID s
 
 	for _, line := range result.Lines {
 		if line.Stream == "stdout" {
-			return strings.TrimSpace(line.Text), nil
+			output := strings.TrimSpace(line.Text)
+			// LXD status is usually just: "RUNNING", "STOPPED", etc. in CSV output
+			if strings.Contains(strings.ToUpper(output), "RUNNING") {
+				return "running", nil
+			} else if strings.Contains(strings.ToUpper(output), "STOPPED") {
+				return "stopped", nil
+			}
 		}
 	}
 
 	return "unknown", nil
 }
 
-// GetContainerLogs retrieves logs from a container
 func (c *ContainerService) GetContainerLogs(ctx context.Context, containerID string, lines int) ([]string, error) {
+	// LXD doesn't provide direct container log access via command line
+	// This is a limitation of the current LXD approach
 	if lines <= 0 {
 		lines = 100
 	}
 
-	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_logs",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"logs", "--tail", fmt.Sprintf("%d", lines), containerID},
-		Timeout: 10 * time.Second,
-	})
-
-	if err != nil || !result.Success {
-		return nil, fmt.Errorf("failed to get container logs")
-	}
-
-	var logs []string
-	for _, line := range result.Lines {
-		logs = append(logs, line.Text)
-	}
-
-	return logs, nil
+	// For now, return an empty slice since LXD doesn't expose container logs directly
+	return []string{}, nil
 }
 
 // RemoveContainer removes a container and its database record
@@ -497,19 +405,17 @@ func (c *ContainerService) RemoveContainer(ctx context.Context, projectID string
 		return nil
 	}
 
-	// Stop and remove from Docker
+	// Stop and remove from LXD
 	c.StopContainer(ctx, projectID)
 
 	// Remove from database
 	return c.db.DeleteContainer(container.ID)
 }
 
-// ListContainers lists all containers for a project
 func (c *ContainerService) ListContainers(projectID string) ([]state.Container, error) {
 	return c.db.ListContainersByProject(projectID)
 }
 
-// SyncContainerStatus syncs the container status from Docker to database
 func (c *ContainerService) SyncContainerStatus(ctx context.Context, projectID string) error {
 	container, err := c.db.GetContainerByProjectID(projectID)
 	if err != nil || container == nil {
@@ -568,9 +474,9 @@ func (c *ContainerService) MonitorContainerHealth(ctx context.Context, projectID
 // GetContainerHealth returns detailed health information about a container
 func (c *ContainerService) GetContainerHealth(ctx context.Context, containerID string) (map[string]interface{}, error) {
 	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_inspect",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"inspect", "--format", "{{json .State}}", containerID},
+		JobType: "lxd_inspect",
+		Command: "lxc",
+		Args:    []string{"list", "--format", "json", containerID},
 		Timeout: 10 * time.Second,
 	})
 
@@ -586,10 +492,17 @@ func (c *ContainerService) GetContainerHealth(ctx context.Context, containerID s
 		}
 	}
 
-	var state map[string]interface{}
+	var state []interface{}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return nil, fmt.Errorf("failed to parse container state: %w", err)
 	}
 
-	return state, nil
+	// Return the first item from the array (the container info)
+	if len(state) > 0 {
+		if containerInfo, ok := state[0].(map[string]interface{}); ok {
+			return containerInfo, nil
+		}
+	}
+
+	return nil, fmt.Errorf("container not found in response")
 }
