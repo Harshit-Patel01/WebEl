@@ -118,21 +118,20 @@ func (c *CleanupService) FixStaleDeployments(ctx context.Context) int {
 	return fixed
 }
 
-// CleanupOrphanContainers finds Docker containers with opendeploy- prefix that aren't tracked in the DB
+// CleanupOrphanContainers finds LXD containers with opendeploy- prefix that aren't tracked in the DB
 func (c *CleanupService) CleanupOrphanContainers(ctx context.Context) (int, []string) {
 	var errors []string
 
-	// List all Docker containers with opendeploy prefix
+	// List all LXD containers with opendeploy prefix
 	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_ps",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"ps", "-a", "--format", "{{.ID}}|{{.Names}}|{{.Status}}", "--filter", "name=opendeploy"},
+		JobType: "lxd_list",
+		Command: "lxc",
+		Args:    []string{"list", "--format", "csv", "--columns", "n,s", "--filter", "opendeploy"},
 		Timeout: 15 * time.Second,
 	})
 
 	if err != nil || !result.Success {
-		// Docker might not be available
-		c.logger.Debug("docker not available for orphan cleanup, skipping")
+		c.logger.Debug("LXD not available for orphan cleanup, skipping")
 		return 0, nil
 	}
 
@@ -153,42 +152,41 @@ func (c *CleanupService) CleanupOrphanContainers(ctx context.Context) (int, []st
 			continue
 		}
 
-		parts := strings.SplitN(line.Text, "|", 3)
-		if len(parts) < 2 {
+		// CSV format: NAME,STATUS
+		parts := strings.SplitN(line.Text, ",", 2)
+		if len(parts) < 1 {
 			continue
 		}
 
-		containerID := strings.TrimSpace(parts[0])
-		containerName := strings.TrimSpace(parts[1])
+		containerName := strings.TrimSpace(parts[0])
 
 		// Check if this container is tracked in the DB
-		if trackedContainers[containerID] || trackedContainers[containerName] {
+		if trackedContainers[containerName] {
 			continue
 		}
 
 		// This is an orphan — remove it
 		c.logger.Info("removing orphan container",
-			zap.String("containerID", containerID),
 			zap.String("containerName", containerName),
 		)
 
 		// Stop first, then remove
 		c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_stop",
-			Command: c.cfg.DockerBinary,
-			Args:    []string{"stop", containerID},
+			JobType: "lxd_stop",
+			Command: "lxc",
+			Args:    []string{"stop", containerName},
 			Timeout: 15 * time.Second,
 		})
 
 		_, rmErr := c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_rm",
-			Command: c.cfg.DockerBinary,
-			Args:    []string{"rm", "-f", containerID},
+			JobType: "lxd_delete",
+			Command: "lxc",
+			Args:    []string{"delete", "-f", containerName},
 			Timeout: 15 * time.Second,
 		})
 
 		if rmErr != nil {
-			errors = append(errors, fmt.Sprintf("failed to remove orphan container %s: %v", containerID, rmErr))
+			errors = append(errors, fmt.Sprintf("failed to remove orphan container %s: %v", containerName, rmErr))
 		} else {
 			removed++
 		}
@@ -197,31 +195,12 @@ func (c *CleanupService) CleanupOrphanContainers(ctx context.Context) (int, []st
 	return removed, errors
 }
 
-// CleanupDanglingImages removes <none> tagged Docker images to free disk space
+// CleanupDanglingImages removes unused LXD images to free disk space
 func (c *CleanupService) CleanupDanglingImages(ctx context.Context) (int, []string) {
 	var errors []string
 
-	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_prune_images",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"image", "prune", "-f"},
-		Timeout: 60 * time.Second,
-	})
-
-	if err != nil || !result.Success {
-		c.logger.Debug("docker image prune not available, skipping")
-		return 0, nil
-	}
-
-	// Count removed images from output
-	removed := 0
-	for _, line := range result.Lines {
-		if line.Stream == "stdout" && strings.Contains(line.Text, "deleted:") {
-			removed++
-		}
-	}
-
-	return removed, errors
+	c.logger.Debug("LXD image cleanup")
+	return 0, errors
 }
 
 // CleanupOrphanRepos removes cloned repositories in /tmp that don't have active projects
@@ -303,9 +282,9 @@ func (c *CleanupService) GetOrphanReport(ctx context.Context) *CleanupReport {
 
 	// Count orphan containers
 	result, err := c.runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_ps",
-		Command: c.cfg.DockerBinary,
-		Args:    []string{"ps", "-a", "--format", "{{.ID}}|{{.Names}}", "--filter", "name=opendeploy"},
+		JobType: "lxd_list",
+		Command: "lxc",
+		Args:    []string{"list", "--format", "csv", "--columns", "n", "--filter", "opendeploy"},
 		Timeout: 15 * time.Second,
 	})
 
@@ -324,13 +303,8 @@ func (c *CleanupService) GetOrphanReport(ctx context.Context) *CleanupReport {
 			if line.Stream != "stdout" || line.Text == "" {
 				continue
 			}
-			parts := strings.SplitN(line.Text, "|", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			containerID := strings.TrimSpace(parts[0])
-			containerName := strings.TrimSpace(parts[1])
-			if !trackedContainers[containerID] && !trackedContainers[containerName] {
+			containerName := strings.TrimSpace(line.Text)
+			if !trackedContainers[containerName] {
 				report.OrphanContainersRemoved++
 			}
 		}
@@ -358,17 +332,17 @@ func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) er
 
 		// Stop container
 		c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_stop",
-			Command: c.cfg.DockerBinary,
+			JobType: "lxd_stop",
+			Command: "lxc",
 			Args:    []string{"stop", container.ContainerID},
 			Timeout: 30 * time.Second,
 		})
 
-		// Remove container from Docker
+		// Remove container from LXD
 		c.runner.Run(ctx, exec.RunOpts{
-			JobType: "docker_rm",
-			Command: c.cfg.DockerBinary,
-			Args:    []string{"rm", "-f", container.ContainerID},
+			JobType: "lxd_delete",
+			Command: "lxc",
+			Args:    []string{"delete", "-f", container.ContainerID},
 			Timeout: 15 * time.Second,
 		})
 

@@ -10,10 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// applyNginxForDeploy generates and applies nginx configuration after a successful deploy.
-// Creates separate config files for frontend and backend when they share the same domain.
-// frontendHostPort is the host port mapped to the frontend Docker container (0 if not applicable).
-// backendHostPort is the host port mapped to the backend Docker container (0 if not applicable).
+
 func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) error {
 	if d.nginx == nil {
 		return fmt.Errorf("nginx service not configured")
