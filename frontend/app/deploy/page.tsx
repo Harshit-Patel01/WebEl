@@ -369,8 +369,6 @@ export default function DeployPage() {
           if (apiKey) {
             const fullDomain = subdomain ? `${subdomain}.${domain}` : domain
 
-            // For Cloudflare Tunnel, always route to nginx (port 80)
-            // Nginx will handle the proxy to Docker containers
             const tunnelPort = 80
 
             await fetch('/api/v1/tunnel/routes', {
@@ -620,7 +618,7 @@ export default function DeployPage() {
                     {projectType === 'web_service'
                       ? 'Static sites, React, Vue, Next.js, etc. Served via nginx or containerized with serve.'
                       : projectType === 'app_service'
-                      ? 'Node.js, Python, Go backends. Run in Docker containers with port mapping.'
+                      ? 'Node.js, Python, Go backends. Run in containers with port mapping.'
                       : 'Combined frontend + backend deployment with nginx proxy configuration.'}
                   </p>
                 </div>
@@ -1137,7 +1135,7 @@ export default function DeployPage() {
                               Frontend Environment Variables
                             </h4>
                             <p className="font-mono text-[9px] text-text-secondary">
-                              Injected into Docker build (e.g., REACT_APP_API_URL=/api)
+                              Injected into lxd build (e.g., REACT_APP_API_URL=/api)
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
