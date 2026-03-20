@@ -407,7 +407,6 @@ python-dotenv==1.0.0`}</pre>
               <div className="mt-2 ml-4 space-y-1 font-sans text-small text-text-secondary">
                 <div>• Delete unused deployments from Deploy page</div>
                 <div>• Clear old log files</div>
-                <div>• Remove Docker images if using containers</div>
                 <div>• Check for large temporary files</div>
               </div>
             </div>
