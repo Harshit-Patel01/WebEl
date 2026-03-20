@@ -38,10 +38,7 @@ type DeployConfig struct {
 	NpmBinary           string        `yaml:"npm_binary"`
 	PythonBinary        string        `yaml:"python_binary"`
 	GoBinary            string        `yaml:"go_binary"`
-	DockerBinary        string        `yaml:"docker_binary"`
-	DockerEnabled       bool          `yaml:"docker_enabled"`
-	DockerMemoryLimit   string        `yaml:"docker_memory_limit"`
-	DockerCPULimit      string        `yaml:"docker_cpu_limit"`
+	LXDEnabled          bool          `yaml:"lxd_enabled"`
 	OutputRoot          string        `yaml:"output_root"`
 	PortPoolStart       int           `yaml:"port_pool_start"`
 	PortPoolEnd         int           `yaml:"port_pool_end"`
@@ -127,15 +124,7 @@ func (c *Config) applyDefaults() {
 	if c.Deploy.GoBinary == "" {
 		c.Deploy.GoBinary = "/usr/local/go/bin/go"
 	}
-	if c.Deploy.DockerBinary == "" {
-		c.Deploy.DockerBinary = "/usr/bin/docker"
-	}
-	if c.Deploy.DockerMemoryLimit == "" {
-		c.Deploy.DockerMemoryLimit = "8192m"
-	}
-	if c.Deploy.DockerCPULimit == "" {
-		c.Deploy.DockerCPULimit = "5.0"
-	}
+
 	if c.Deploy.OutputRoot == "" {
 		c.Deploy.OutputRoot = "/var/www/opendeploy"
 	}
