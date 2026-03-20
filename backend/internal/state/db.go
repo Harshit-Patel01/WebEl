@@ -252,10 +252,9 @@ INSERT OR REPLACE INTO schema_version (version) VALUES (8);
 `
 
 const migration009 = `
--- Add working_directory to projects table
+
 ALTER TABLE projects ADD COLUMN working_directory TEXT DEFAULT '';
 
--- Create containers table for Docker container management
 CREATE TABLE IF NOT EXISTS containers (
 	id TEXT PRIMARY KEY,
 	project_id TEXT NOT NULL,
