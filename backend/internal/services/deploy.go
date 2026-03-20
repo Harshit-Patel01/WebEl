@@ -551,83 +551,33 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 	// Run in background goroutine
 	go func() {
 		var err error
-		projectDir := filepath.Join("/tmp", project.ID)
 		buildStart := time.Now()
 
 		// Create a new context for the deployment (not tied to the HTTP request)
 		deployCtx := context.Background()
 
-		// AP now runs on a separate virtual interface (ap0) so it does not
-		// interfere with wlan0 connectivity during builds.
-
-		// Clone or pull
-		d.broadcastPhase(deployID, "clone", "Cloning repository...")
+		// Skip host-side cloning - will clone inside containers
 		logToDB("stdout", "Starting deployment...")
 		logToDB("stdout", fmt.Sprintf("Repository: %s", project.RepoURL))
+		logToDB("stdout", fmt.Sprintf("Branch: %s", project.Branch))
 
-		var gitResult *exec.ExecResult
-		if fileExists(filepath.Join(projectDir, ".git")) {
-			logToDB("stdout", "Pulling latest changes...")
-			gitResult, err = d.Pull(deployCtx, project.ID, project.Branch, deployID+"-pull")
-		} else {
-			logToDB("stdout", "Cloning repository...")
-			gitResult, err = d.Clone(deployCtx, project.RepoURL, project.Branch, project.ID, deployID+"-clone")
+		// Detect framework and working directory (needed for single-service deployments)
+		workingDir := project.WorkingDirectory
+		if workingDir == "" || workingDir == "." {
+			workingDir = "."
 		}
-		if err != nil {
-			logToDB("stderr", fmt.Sprintf("Git operation failed: %s", err.Error()))
-			d.failDeploy(deploy, err.Error())
-			return
-		}
-		if gitResult != nil && !gitResult.Success {
-			errMsg := fmt.Sprintf("git failed with exit code %d", gitResult.ExitCode)
-			for _, line := range gitResult.Lines {
-				if line.Stream == "stderr" {
-					errMsg = line.Text
-					logToDB("stderr", line.Text)
-					break
-				}
-			}
-			d.failDeploy(deploy, errMsg)
-			return
-		}
-		logToDB("stdout", "Repository cloned successfully")
-
-		// Get commit info
-		commit, _ := d.GetLatestCommit(project.ID)
-		if commit != nil {
-			deploy.CommitHash = commit.Hash
-			deploy.CommitMessage = commit.Subject
-			deploy.CommitAuthor = commit.Author
-			logToDB("stdout", fmt.Sprintf("Commit: %s - %s", commit.Hash[:7], commit.Subject))
-		}
-
-		// Detect working directory
-		d.broadcastPhase(deployID, "detect", "Detecting project structure...")
-		workingDir := d.DetectWorkingDirectory(project.ID, project.WorkingDirectory)
 		logToDB("stdout", fmt.Sprintf("Working directory: %s", workingDir))
 
-		actualProjectDir := projectDir
-		if workingDir != "" && workingDir != "." {
-			actualProjectDir = filepath.Join(projectDir, workingDir)
-		}
-
-		// Detect framework immediately after determining working directory
-		d.broadcastPhase(deployID, "detect", "Detecting framework...")
-		framework := d.lxd.DetectFramework(actualProjectDir)
-		d.logger.Info("detected framework",
-			zap.String("projectId", project.ID),
-			zap.String("framework", string(framework)),
-		)
-		logToDB("stdout", fmt.Sprintf("Detected framework: %s", framework))
-
-		// Store framework info on the deploy record
+		// For LXD deployments, framework will be detected AFTER cloning inside container
+		// Set default values here, will be updated after clone
+		framework := FrameworkUnknown
 		deploy.Framework = string(framework)
-		deploy.IsBackend = IsBackendFramework(framework)
+		deploy.IsBackend = false
 
-		// Determine project type if not set
+		// Determine project type
 		projectType := ProjectType(project.ProjectType)
 		if projectType == "" {
-			projectType = d.DetectProjectType(project.ID)
+			projectType = ProjectStatic
 		}
 
 		// Check if this is a Full Stack deployment
@@ -648,9 +598,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				backendDir = "backend"
 			}
 
-			// Detect backend framework
-			backendProjectDir := filepath.Join(projectDir, backendDir)
-			backendFramework := d.lxd.DetectFramework(backendProjectDir)
+			// Use default framework for full-stack frontend
+			backendFramework := FrameworkNode
 			logToDB("stdout", fmt.Sprintf("Backend framework: %s", backendFramework))
 
 			deploy.Framework = fmt.Sprintf("fullstack_%s", backendFramework)
@@ -673,241 +622,286 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				startCmd = GetDefaultStartCommand(backendFramework, backendContainerPort)
 			}
 
-			// ==================== LXD DEPLOYMENT ====================
-			// Create single LXD container for both frontend and backend
-			d.broadcastPhase(deployID, "build", "Creating LXD container...")
-			logToDB("stdout", "Creating LXD container for full-stack deployment...")
+			// ==================== FRONTEND CONTAINER ====================
+			d.broadcastPhase(deployID, "build", "Creating frontend container...")
+			logToDB("stdout", "Creating LXD container for frontend...")
 
-			// Use Alpine as base image (lightweight)
-			containerInfo, containerErr := d.lxd.CreateContainer(deployCtx, project.ID, project.Name, "alpine:3.19")
-			if containerErr != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to create LXD container: %s", containerErr.Error()))
-				d.failDeploy(deploy, containerErr.Error())
+			frontendContainerInfo, frontendErr := d.lxd.CreateContainer(deployCtx, project.ID+"-frontend", project.Name+"-frontend", "images:alpine/3.20")
+			if frontendErr != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to create frontend container: %s", frontendErr.Error()))
+				d.failDeploy(deploy, frontendErr.Error())
 				return
 			}
 
-			logToDB("stdout", fmt.Sprintf("Container created: %s (ID: %s, IP: %s)", containerInfo.Name, containerInfo.ID, containerInfo.IP))
+			logToDB("stdout", fmt.Sprintf("Frontend container created: %s (ID: %s)", frontendContainerInfo.Name, frontendContainerInfo.ID))
 
-			// Find available host port for the container
-			hostPort, portErr := d.portAllocator.AllocatePort("fullstack")
-			if portErr != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to allocate host port: %s", portErr.Error()))
-				d.failDeploy(deploy, portErr.Error())
-				return
-			}
-			containerInfo.HostPort = hostPort
-			containerInfo.ContainerPort = 80 // Frontend serves on port 80
-
-			logToDB("stdout", fmt.Sprintf("Allocated host port: %d", hostPort))
-
-			// Setup port proxy from host to container
-			d.broadcastPhase(deployID, "service", "Setting up port proxy...")
-			logToDB("stdout", "Setting up port proxy...")
-			if err := d.lxd.SetupPortProxy(deployCtx, containerInfo.ID, containerInfo.ContainerPort, hostPort); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to setup port proxy: %s", err.Error()))
+			// Clone repository in frontend container FIRST
+			logToDB("stdout", "Cloning repository in frontend container...")
+			frontendCloneCmd := fmt.Sprintf("mkdir -p /app && cd /app && git clone --branch %s --depth 1 %s repo", project.Branch, project.RepoURL)
+			if _, err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, frontendCloneCmd); err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to clone repository in frontend container: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
 				return
 			}
-			logToDB("stdout", fmt.Sprintf("Port proxy configured: %d → %d", hostPort, containerInfo.ContainerPort))
+			logToDB("stdout", "Repository cloned in frontend container")
 
-			// Copy project files to container
-			d.broadcastPhase(deployID, "build", "Copying project files...")
-			logToDB("stdout", "Copying project files to container...")
-			if err := d.lxd.CopyFilesToContainer(deployCtx, containerInfo.ID, projectDir, "/app"); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to copy files: %s", err.Error()))
+			// Install base dependencies first (git, node, npm, nginx, etc.)
+			d.broadcastPhase(deployID, "build", "Installing base dependencies...")
+			logToDB("stdout", "Installing base dependencies in frontend container...")
+
+			// Install minimal deps then framework-specific for frontend
+			minimalDepsCmd := "apk update && apk add --no-cache git curl bash ca-certificates"
+			minimalResult, _ := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, minimalDepsCmd)
+			if minimalResult != nil && minimalResult.ExitCode != 0 {
+				logToDB("stderr", "Failed to install minimal dependencies")
+				for _, line := range minimalResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+				d.failDeploy(deploy, "Failed to install minimal dependencies")
+				return
+			}
+			if minimalResult != nil {
+				for _, line := range minimalResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+
+			// Install Node.js, npm, and nginx for frontend
+			nodeDepsCmd := "apk add --no-cache nodejs npm nginx"
+			nodeResult, _ := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, nodeDepsCmd)
+			if nodeResult != nil && nodeResult.ExitCode != 0 {
+				logToDB("stderr", "Failed to install Node.js and nginx")
+				for _, line := range nodeResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+				d.failDeploy(deploy, "Failed to install Node.js and nginx")
+				return
+			}
+			if nodeResult != nil {
+				for _, line := range nodeResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			logToDB("stdout", "Base dependencies installed successfully")
+
+			// Allocate frontend port
+			frontendHostPort, frontendPortErr := d.portAllocator.AllocatePort("frontend")
+			if frontendPortErr != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to allocate frontend port: %s", frontendPortErr.Error()))
+				d.failDeploy(deploy, frontendPortErr.Error())
+				return
+			}
+			logToDB("stdout", fmt.Sprintf("Allocated frontend host port: %d", frontendHostPort))
+
+			// Setup frontend port proxy (container port 80 -> host port)
+			if err := d.lxd.SetupPortProxy(deployCtx, frontendContainerInfo.ID, 80, frontendHostPort); err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to setup frontend port proxy: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
 				return
 			}
-			logToDB("stdout", "Project files copied successfully")
-
-			// Install frontend dependencies
-			d.broadcastPhase(deployID, "build", "Installing frontend dependencies...")
-			logToDB("stdout", "Installing frontend dependencies...")
-			frontendInstallCmd := "npm install --prefer-offline --no-audit --no-fund"
-			if err := d.lxd.InstallInContainer(deployCtx, containerInfo.ID, frontendInstallCmd, envVars); err != nil {
-				logToDB("stderr", fmt.Sprintf("Frontend installation failed: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
-				return
-			}
-			logToDB("stdout", "Frontend dependencies installed")
 
 			// Build frontend
 			d.broadcastPhase(deployID, "build", "Building frontend...")
 			logToDB("stdout", "Building frontend...")
-			frontendBuildCmd := "npm run build"
-			if project.OutputDir != "" {
-				frontendBuildCmd = fmt.Sprintf("OUTPUT_DIR=%s npm run build", project.OutputDir)
-			}
-			_, err = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, frontendBuildCmd)
-			if err != nil {
+			frontendWorkDir := fmt.Sprintf("/app/repo/%s", frontendDir)
+			frontendBuildCmd := fmt.Sprintf("cd %s && npm install --prefer-offline --no-audit && npm run build", frontendWorkDir)
+			if _, err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, frontendBuildCmd); err != nil {
 				logToDB("stderr", fmt.Sprintf("Frontend build failed: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
 				return
 			}
-			logToDB("stdout", "Frontend built successfully")
+
+			// Configure nginx for frontend (already installed with base deps)
+			logToDB("stdout", "Configuring nginx in frontend container...")
+			frontendOutputPath := fmt.Sprintf("/app/repo/%s/dist", frontendDir)
+			if project.OutputDir != "" {
+				frontendOutputPath = fmt.Sprintf("/app/repo/%s/%s", frontendDir, project.OutputDir)
+			}
+
+			nginxSetupCmd := fmt.Sprintf(`
+				mkdir -p /run/nginx && \
+				echo 'server { listen 80; root %s; index index.html; location / { try_files $uri $uri/ /index.html; } }' > /etc/nginx/http.d/default.conf && \
+				nginx -t && nginx -g 'daemon off;' >/dev/null 2>&1 &
+			`, frontendOutputPath)
+
+			if _, err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, nginxSetupCmd); err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to setup nginx in frontend container: %s", err.Error()))
+				d.failDeploy(deploy, err.Error())
+				return
+			}
+			logToDB("stdout", "Frontend container ready")
+
+			// ==================== BACKEND CONTAINER ====================
+			d.broadcastPhase(deployID, "build", "Creating backend container...")
+			logToDB("stdout", "Creating LXD container for backend...")
+
+			backendContainerInfo, backendErr := d.lxd.CreateContainer(deployCtx, project.ID+"-backend", project.Name+"-backend", "images:alpine/3.20")
+			if backendErr != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to create backend container: %s", backendErr.Error()))
+				d.failDeploy(deploy, backendErr.Error())
+				return
+			}
+
+			logToDB("stdout", fmt.Sprintf("Backend container created: %s (ID: %s)", backendContainerInfo.Name, backendContainerInfo.ID))
+
+			// Install base dependencies FIRST
+			d.broadcastPhase(deployID, "build", "Installing base dependencies...")
+			logToDB("stdout", "Installing base dependencies in backend container...")
+
+			// Install minimal deps first
+			backendMinDepsCmd := "apk update && apk add --no-cache git curl bash ca-certificates"
+			backendMinResult, _ := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, backendMinDepsCmd)
+			if backendMinResult != nil && backendMinResult.ExitCode != 0 {
+				logToDB("stderr", "Failed to install minimal dependencies")
+				for _, line := range backendMinResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+				d.failDeploy(deploy, "Failed to install minimal dependencies")
+				return
+			}
+			if backendMinResult != nil {
+				for _, line := range backendMinResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+
+			// Install backend deps (Node.js, Python, Go)
+			backendDepsCmd := "apk add --no-cache nodejs npm python3 py3-pip go"
+			backendResult, _ := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, backendDepsCmd)
+			if backendResult != nil && backendResult.ExitCode != 0 {
+				logToDB("stderr", "Failed to install backend dependencies")
+				for _, line := range backendResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+				d.failDeploy(deploy, "Failed to install backend dependencies")
+				return
+			}
+			if backendResult != nil {
+				for _, line := range backendResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			logToDB("stdout", "Base dependencies installed successfully")
+
+			// Allocate backend port
+			backendHostPort, backendPortErr := d.portAllocator.AllocatePort("backend")
+			if backendPortErr != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to allocate backend port: %s", backendPortErr.Error()))
+				d.failDeploy(deploy, backendPortErr.Error())
+				return
+			}
+			logToDB("stdout", fmt.Sprintf("Allocated backend host port: %d", backendHostPort))
+
+			// Setup backend port proxy (container port -> host port)
+			if err := d.lxd.SetupPortProxy(deployCtx, backendContainerInfo.ID, backendContainerPort, backendHostPort); err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to setup backend port proxy: %s", err.Error()))
+				d.failDeploy(deploy, err.Error())
+				return
+			}
+
+			// Clone repository in backend container
+			logToDB("stdout", "Cloning repository in backend container...")
+			backendCloneCmd := fmt.Sprintf("mkdir -p /app && cd /app && git clone --branch %s --depth 1 %s repo", project.Branch, project.RepoURL)
+			if _, err := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, backendCloneCmd); err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to clone repository in backend container: %s", err.Error()))
+				d.failDeploy(deploy, err.Error())
+				return
+			}
 
 			// Install backend dependencies
-			d.broadcastPhase(deployID, "build", "Installing backend dependencies...")
-			logToDB("stdout", "Installing backend dependencies...")
-			if err := d.lxd.InstallInContainer(deployCtx, containerInfo.ID, backendInstallCmd, envVars); err != nil {
+			backendWorkDir := fmt.Sprintf("/app/repo/%s", backendDir)
+			installBackendCmd := fmt.Sprintf("cd %s && %s", backendWorkDir, backendInstallCmd)
+			if _, err := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, installBackendCmd); err != nil {
 				logToDB("stderr", fmt.Sprintf("Backend installation failed: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
 				return
 			}
-			logToDB("stdout", "Backend dependencies installed")
 
 			// Run backend build command if provided
 			if project.BackendBuildCommand != "" {
-				d.broadcastPhase(deployID, "build", "Running backend build command...")
-				logToDB("stdout", fmt.Sprintf("Running backend build command: %s", project.BackendBuildCommand))
-				_, err = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, project.BackendBuildCommand)
-				if err != nil {
-					logToDB("stderr", fmt.Sprintf("Backend build command failed: %s", err.Error()))
+				buildBackendCmd := fmt.Sprintf("cd %s && %s", backendWorkDir, project.BackendBuildCommand)
+				if _, err := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, buildBackendCmd); err != nil {
+					logToDB("stderr", fmt.Sprintf("Backend build failed: %s", err.Error()))
 					d.failDeploy(deploy, err.Error())
 					return
 				}
-				logToDB("stdout", "Backend build command completed successfully")
+			}
+
+			// Write environment variables to .env file
+			if len(envVars) > 0 {
+				envContent := ""
+				for k, v := range envVars {
+					envContent += fmt.Sprintf("%s=%s\n", k, v)
+				}
+				writeEnvCmd := fmt.Sprintf("cd %s && cat > .env << 'EOF'\n%sEOF", backendWorkDir, envContent)
+				d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, writeEnvCmd)
 			}
 
 			// Start backend service
-			d.broadcastPhase(deployID, "service", "Starting backend service...")
-			logToDB("stdout", "Starting backend service...")
-			if err := d.lxd.StartService(deployCtx, containerInfo.ID, startCmd); err != nil {
+			startBackendCmd := fmt.Sprintf("cd %s && nohup %s > /var/log/app.log 2>&1 &", backendWorkDir, startCmd)
+			if _, err := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, startBackendCmd); err != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to start backend: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
 				return
 			}
 			logToDB("stdout", "Backend service started")
 
-			// Configure nginx for full-stack
-			if opts != nil && opts.EnableNginx && opts.Domain != "" {
-				d.broadcastPhase(deployID, "service", "Configuring nginx...")
-				logToDB("stdout", "Configuring nginx for full-stack deployment...")
-
-				domain := opts.Domain
-
-				// Create frontend config (serves on /)
-				frontendCfg := NginxSiteConfig{
-					Domain:               domain,
-					FrontendPath:         "",
-					ProxyEnabled:         false,
-					ProxyPort:            0,
-					FrontendProxyEnabled: true,
-					FrontendProxyPort:    hostPort,
-				}
-				frontendConfigContent := d.nginx.GenerateFrontendConfig(frontendCfg)
-				frontendConfigName := fmt.Sprintf("frontend-%s", domain)
-
-				if err := d.nginx.WriteConfig(frontendConfigName, frontendConfigContent); err != nil {
-					logToDB("stderr", fmt.Sprintf("Frontend nginx config failed: %s", err.Error()))
-				} else {
-					logToDB("stdout", fmt.Sprintf("Frontend nginx config written: %s", frontendConfigName))
-				}
-
-				// Create backend config (serves on /api/)
-				backendCfg := NginxSiteConfig{
-					Domain:               domain,
-					FrontendPath:         "",
-					ProxyEnabled:         true,
-					ProxyPort:            hostPort,
-					FrontendProxyEnabled: false,
-					FrontendProxyPort:    0,
-				}
-				backendConfigContent := d.nginx.GenerateBackendConfig(backendCfg)
-				backendConfigName := fmt.Sprintf("backend-%s", domain)
-
-				if err := d.nginx.WriteConfig(backendConfigName, backendConfigContent); err != nil {
-					logToDB("stderr", fmt.Sprintf("Backend nginx config failed: %s", err.Error()))
-				} else {
-					logToDB("stdout", fmt.Sprintf("Backend nginx config written: %s", backendConfigName))
-				}
-
-				// Test and reload nginx
-				testResult, err := d.nginx.TestConfig(deployCtx)
-				if err != nil {
-					logToDB("stderr", fmt.Sprintf("Nginx config test failed: %s", err.Error()))
-				} else if !testResult.Success {
-					logToDB("stderr", fmt.Sprintf("Nginx config test failed: %s", testResult.Output))
-				} else {
-					if err := d.nginx.Reload(deployCtx); err != nil {
-						logToDB("stderr", fmt.Sprintf("Nginx reload failed: %s", err.Error()))
-					} else {
-						logToDB("stdout", fmt.Sprintf("Nginx configured: frontend at /, backend at /api (host port %d)", hostPort))
-					}
-				}
-			}
-
-			// Save container info to database
-			container := &state.Container{
+			// Save both containers to database
+			frontendContainer := &state.Container{
 				ProjectID:    project.ID,
-				Name:         containerInfo.Name,
-				Image:        "alpine:3.19",
-				ContainerID:  containerInfo.ID,
+				Name:         frontendContainerInfo.Name,
+				Image:        "images:alpine/3.20",
+				ContainerID:  frontendContainerInfo.ID,
 				Status:       "running",
-				PortMappings: fmt.Sprintf(`{"host":"%d","container":"80"}`, hostPort),
+				PortMappings: fmt.Sprintf(`{"host":"%d","container":"80"}`, frontendHostPort),
 			}
-			if err := d.db.CreateContainer(container); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to save container: %s", err.Error()))
+			d.db.CreateContainer(frontendContainer)
+
+			backendContainer := &state.Container{
+				ProjectID:    project.ID,
+				Name:         backendContainerInfo.Name,
+				Image:        "images:alpine/3.20",
+				ContainerID:  backendContainerInfo.ID,
+				Status:       "running",
+				PortMappings: fmt.Sprintf(`{"host":"%d","container":"%d"}`, backendHostPort, backendContainerPort),
 			}
+			d.db.CreateContainer(backendContainer)
 
-			logToDB("stdout", fmt.Sprintf("Full Stack deployment completed! Container: %s, Host Port: %d", containerInfo.Name, hostPort))
-
-			// Configure nginx for Full Stack - create separate configs for frontend and backend
+			// Configure host nginx if domain provided
 			if opts != nil && opts.EnableNginx && opts.Domain != "" {
-				logToDB("stdout", "Configuring nginx for Full Stack deployment...")
-
+				logToDB("stdout", "Configuring host nginx for domain routing...")
 				domain := opts.Domain
 
-				// Create frontend config (serves on /)
+				// Frontend config
 				frontendCfg := NginxSiteConfig{
 					Domain:               domain,
-					FrontendPath:         "",
-					ProxyEnabled:         false,
-					ProxyPort:            0,
 					FrontendProxyEnabled: true,
-					FrontendProxyPort:    hostPort,
+					FrontendProxyPort:    frontendHostPort,
 				}
 				frontendConfigContent := d.nginx.GenerateFrontendConfig(frontendCfg)
-				frontendConfigName := fmt.Sprintf("frontend-%s", domain)
-
-				if err := d.nginx.WriteConfig(frontendConfigName, frontendConfigContent); err != nil {
+				if err := d.nginx.WriteConfig(fmt.Sprintf("frontend-%s", domain), frontendConfigContent); err != nil {
 					logToDB("stderr", fmt.Sprintf("Frontend nginx config failed: %s", err.Error()))
-				} else {
-					logToDB("stdout", fmt.Sprintf("Frontend nginx config written: %s", frontendConfigName))
 				}
 
-				// Create backend config (serves on /api/)
+				// Backend config
 				backendCfg := NginxSiteConfig{
-					Domain:               domain,
-					FrontendPath:         "",
-					ProxyEnabled:         true,
-					ProxyPort:            hostPort,
-					FrontendProxyEnabled: false,
-					FrontendProxyPort:    0,
+					Domain:       domain,
+					ProxyEnabled: true,
+					ProxyPort:    backendHostPort,
 				}
 				backendConfigContent := d.nginx.GenerateBackendConfig(backendCfg)
-				backendConfigName := fmt.Sprintf("backend-%s", domain)
-
-				if err := d.nginx.WriteConfig(backendConfigName, backendConfigContent); err != nil {
+				if err := d.nginx.WriteConfig(fmt.Sprintf("backend-%s", domain), backendConfigContent); err != nil {
 					logToDB("stderr", fmt.Sprintf("Backend nginx config failed: %s", err.Error()))
-				} else {
-					logToDB("stdout", fmt.Sprintf("Backend nginx config written: %s", backendConfigName))
 				}
 
-				// Test and reload nginx
-				testResult, err := d.nginx.TestConfig(deployCtx)
-				if err != nil {
-					logToDB("stderr", fmt.Sprintf("Nginx config test failed: %s", err.Error()))
-				} else if !testResult.Success {
-					logToDB("stderr", fmt.Sprintf("Nginx config test failed: %s", testResult.Output))
-				} else {
-					if err := d.nginx.Reload(deployCtx); err != nil {
-						logToDB("stderr", fmt.Sprintf("Nginx reload failed: %s", err.Error()))
-					} else {
-						logToDB("stdout", fmt.Sprintf("Nginx configured: frontend at /, backend at /api (host port %d)", hostPort))
-					}
+				// Reload nginx
+				if testResult, err := d.nginx.TestConfig(deployCtx); err == nil && testResult.Success {
+					d.nginx.Reload(deployCtx)
+					logToDB("stdout", fmt.Sprintf("Nginx configured: frontend port %d, backend port %d", frontendHostPort, backendHostPort))
 				}
 			}
+
+			logToDB("stdout", fmt.Sprintf("Full Stack deployment completed! Frontend: %d, Backend: %d", frontendHostPort, backendHostPort))
 
 			// Success
 			now := time.Now()
@@ -919,13 +913,10 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			deploy.BuildDuration = buildDurationSeconds
 			d.db.UpdateDeploy(deploy)
 
-			// Record performance statistics for auto-optimization
+			// Record performance statistics
 			if d.perfOptimizer != nil {
 				d.perfOptimizer.RecordBuildStats(buildDuration)
 			}
-
-			logToDB("stdout", "")
-			logToDB("stdout", fmt.Sprintf("Full Stack deployment completed successfully! (%.1fs)", buildDurationSeconds))
 
 			if d.broadcaster != nil {
 				d.broadcaster.BroadcastToJob(deployID, map[string]interface{}{
@@ -986,7 +977,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// Create LXD container
 			d.broadcastPhase(deployID, "build", "Creating LXD container...")
-			containerInfo, containerErr := d.lxd.CreateContainer(deployCtx, project.ID, project.Name, "alpine:3.19")
+			containerInfo, containerErr := d.lxd.CreateContainer(deployCtx, project.ID, project.Name, "images:alpine/3.20")
 			if containerErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create LXD container: %s", containerErr.Error()))
 				d.failDeploy(deploy, containerErr.Error())
@@ -995,7 +986,118 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			logToDB("stdout", fmt.Sprintf("Container created: %s (ID: %s, IP: %s)", containerInfo.Name, containerInfo.ID, containerInfo.IP))
 
-			// Find available host port for the container
+			// STEP 1: Clone repository directly inside the container FIRST
+			d.broadcastPhase(deployID, "build", "Cloning repository in container...")
+			logToDB("stdout", "Cloning repository inside container...")
+
+			cloneCmd := fmt.Sprintf("apk update && apk add --no-cache git && mkdir -p /app && cd /app && git clone --branch %s --depth 1 %s repo", project.Branch, project.RepoURL)
+			cloneResult, cloneErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, cloneCmd)
+			if cloneErr != nil || !cloneResult.Success {
+				logToDB("stderr", fmt.Sprintf("Failed to clone repository: %s", cloneErr))
+				if cloneResult != nil {
+					for _, line := range cloneResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+				d.failDeploy(deploy, "Failed to clone repository")
+				return
+			}
+			logToDB("stdout", "Repository cloned successfully in container")
+
+			// STEP 2: Determine working directory inside container
+			// Root is at /app/repo, user-specified working dir is appended
+			workDir := "/app/repo"
+			if workingDir != "" && workingDir != "." {
+				workDir = fmt.Sprintf("/app/repo/%s", workingDir)
+			}
+			logToDB("stdout", fmt.Sprintf("Working directory: %s", workDir))
+
+			// STEP 3: Install base dependencies BEFORE framework detection
+			// We need git, node, npm, python, etc. available before we can check files
+			d.broadcastPhase(deployID, "build", "Installing base dependencies...")
+			logToDB("stdout", "Installing base dependencies in container...")
+
+			// First install minimal deps for framework detection
+			logToDB("stdout", "Installing git, curl, bash, and ca-certificates...")
+			minimalDepsCmd := "apk update && apk add --no-cache git curl bash ca-certificates"
+			minimalResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, minimalDepsCmd)
+			if minimalResult != nil && minimalResult.ExitCode != 0 {
+				logToDB("stderr", "Failed to install minimal dependencies")
+				for _, line := range minimalResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+				d.failDeploy(deploy, "Failed to install minimal dependencies")
+				return
+			}
+			// Log all output from minimal deps install
+			if minimalResult != nil {
+				for _, line := range minimalResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			logToDB("stdout", "Minimal dependencies installed successfully")
+
+			// STEP 4: Detect framework by checking for specific files inside container
+			d.broadcastPhase(deployID, "detect", "Detecting framework...")
+			logToDB("stdout", "Detecting framework from cloned files...")
+
+			// Use the LXD service's framework detection helper
+			framework = d.lxd.DetectFrameworkInContainer(deployCtx, containerInfo.ID, workDir)
+
+			d.logger.Info("detected framework",
+				zap.String("projectId", project.ID),
+				zap.String("framework", string(framework)),
+			)
+			logToDB("stdout", fmt.Sprintf("Detected framework: %s", framework))
+
+			// STEP 5: Install framework-specific dependencies
+			// Now that we know the framework, install only what's needed
+			logToDB("stdout", fmt.Sprintf("Installing dependencies for %s framework...", framework))
+
+			err = d.lxd.InstallDependencies(deployCtx, containerInfo.ID, framework, false)
+			if err != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to install framework dependencies: %v", err))
+				d.failDeploy(deploy, fmt.Sprintf("Failed to install framework dependencies: %v", err))
+				return
+			}
+			logToDB("stdout", "Framework dependencies installed successfully")
+
+			d.logger.Info("detected framework",
+				zap.String("projectId", project.ID),
+				zap.String("framework", string(framework)),
+			)
+			logToDB("stdout", fmt.Sprintf("Detected framework: %s", framework))
+
+			// Store framework info on the deploy record
+			deploy.Framework = string(framework)
+			deploy.IsBackend = IsBackendFramework(framework)
+
+			// Get install and start commands based on detected framework
+			installCmd = ""
+			if project.InstallCommand != nil && *project.InstallCommand != "" {
+				installCmd = *project.InstallCommand
+			} else {
+				installCmd = GetDefaultInstallCommand(framework)
+			}
+
+			startCmd = ""
+			if deploy.IsBackend {
+				if project.StartCommand != nil && *project.StartCommand != "" {
+					startCmd = *project.StartCommand
+				} else {
+					startCmd = GetDefaultStartCommand(framework, containerPort)
+				}
+			}
+
+			containerPort = 80 // Default for frontend
+			if deploy.IsBackend {
+				containerPort = GetDefaultPort(framework)
+				if project.LocalPort > 0 {
+					containerPort = project.LocalPort
+				}
+			}
+
+			// STEP 5: Allocate host port for the container
 			hostPort, portErr := d.portAllocator.AllocatePort(string(projectType))
 			if portErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to allocate host port: %s", portErr.Error()))
@@ -1017,48 +1119,228 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 			logToDB("stdout", fmt.Sprintf("Port proxy configured: %d → %d", hostPort, containerInfo.ContainerPort))
 
-			// Copy project files to container
-			projectPath := filepath.Join("/tmp", project.ID)
-			if workingDir != "" && workingDir != "." {
-				projectPath = filepath.Join(projectPath, workingDir)
-			}
+			// STEP 6: Install project dependencies
+			d.broadcastPhase(deployID, "build", "Installing project dependencies...")
+			logToDB("stdout", "Installing project dependencies in container...")
 
-			d.broadcastPhase(deployID, "build", "Copying project files...")
-			logToDB("stdout", "Copying project files to container...")
-			if err := d.lxd.CopyFilesToContainer(deployCtx, containerInfo.ID, projectPath, "/app"); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to copy files: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
+			installProjectCmd := fmt.Sprintf("cd %s && %s", workDir, installCmd)
+			installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, installProjectCmd)
+			if installErr != nil || !installResult.Success {
+				logToDB("stderr", fmt.Sprintf("Failed to install project dependencies: %s", installErr))
+				if installResult != nil {
+					for _, line := range installResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+				d.failDeploy(deploy, "Failed to install project dependencies")
 				return
 			}
-			logToDB("stdout", "Project files copied successfully")
+			logToDB("stdout", "Project dependencies installed successfully")
 
-			// Install dependencies in container
-			d.broadcastPhase(deployID, "build", "Installing dependencies...")
-			logToDB("stdout", "Installing dependencies in container...")
-			if err := d.lxd.InstallInContainer(deployCtx, containerInfo.ID, installCmd, envVars); err != nil {
-				logToDB("stderr", fmt.Sprintf("Installation failed: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
-				return
+			// STEP 7: Build project
+			// Build is needed for: frontend frameworks (React, Vue, etc.), Next.js, Nuxt.js, or when explicitly specified
+			needsBuild := !deploy.IsBackend // Frontend needs build
+			if project.BuildCommand != "" && project.BuildCommand != "skip" {
+				needsBuild = true // User wants to build
 			}
-			logToDB("stdout", "Dependencies installed")
+			if project.BuildCommand == "skip" {
+				needsBuild = false // User wants to skip
+			}
 
-			// Start service in container if it's a backend
-			if isBackend {
+			if needsBuild {
+				d.broadcastPhase(deployID, "build", "Building project...")
+				logToDB("stdout", "Building project in container...")
+
+				// Get framework-specific build command
+				buildCmd := ""
+				switch framework {
+				case FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix:
+					buildCmd = "npm run build"
+				case FrameworkReact, FrameworkVue, FrameworkAngular, FrameworkSvelte, FrameworkVite, FrameworkWebpack:
+					buildCmd = "npm run build"
+				case FrameworkExpress, FrameworkFastify, FrameworkNode:
+					// These are backend, may not need build unless specified
+					buildCmd = ""
+				case FrameworkGo:
+					// Go needs build for backend
+					if deploy.IsBackend {
+						buildCmd = "go build -o server ."
+					}
+				case FrameworkFlask, FrameworkDjango, FrameworkFastAPI:
+					// Python projects may not have a build step
+					buildCmd = ""
+				default:
+					// Unknown - try build command for frontend
+					if !deploy.IsBackend {
+						buildCmd = "npm run build"
+					}
+				}
+
+				// Override with user-provided build command if specified
+				if project.BuildCommand != "" && project.BuildCommand != "skip" {
+					buildCmd = project.BuildCommand
+				}
+
+				if buildCmd != "" {
+					logToDB("stdout", fmt.Sprintf("Running: cd %s && %s", workDir, buildCmd))
+					buildProjectCmd := fmt.Sprintf("cd %s && %s", workDir, buildCmd)
+					buildResult, buildErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, buildProjectCmd)
+
+					// Log build output
+					if buildResult != nil {
+						for _, line := range buildResult.Lines {
+							logToDB(line.Stream, line.Text)
+						}
+					}
+
+					if buildErr != nil || (buildResult != nil && buildResult.ExitCode != 0) {
+						logToDB("stderr", fmt.Sprintf("Failed to build project: %s", buildErr))
+						d.failDeploy(deploy, "Failed to build project")
+						return
+					}
+					logToDB("stdout", "Project built successfully")
+				} else {
+					logToDB("stdout", "No build command for this framework type")
+				}
+			}
+
+			// Configure container to auto-start on boot
+			d.broadcastPhase(deployID, "service", "Configuring container auto-start...")
+			logToDB("stdout", "Configuring container to auto-start on system boot...")
+			autostartCmd := fmt.Sprintf("lxc config set %s boot.autostart true", containerInfo.ID)
+			autostarResult, _ := d.runner.Run(deployCtx, exec.RunOpts{
+				JobType: "lxd_autostart",
+				Command: autostartCmd,
+				Timeout: 10 * time.Second,
+			})
+			if autostarResult != nil {
+				for _, line := range autostarResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			logToDB("stdout", "Container configured to auto-start on boot")
+
+			// STEP 8: Start service or configure nginx
+			if deploy.IsBackend {
 				d.broadcastPhase(deployID, "service", "Starting service...")
-				logToDB("stdout", "Starting service in container...")
-				if err := d.lxd.StartService(deployCtx, containerInfo.ID, startCmd); err != nil {
-					logToDB("stderr", fmt.Sprintf("Failed to start service: %s", err.Error()))
-					d.failDeploy(deploy, err.Error())
+				logToDB("stdout", "Creating OpenRC service file for auto-restart...")
+
+				// Write environment variables to .env file
+				if len(envVars) > 0 {
+					envContent := ""
+					for k, v := range envVars {
+						envContent += fmt.Sprintf("%s=%s\n", k, v)
+					}
+					writeEnvCmd := fmt.Sprintf("cd %s && cat > .env << 'EOF'\n%sEOF", workDir, envContent)
+					_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeEnvCmd)
+				}
+
+				// Create OpenRC service file for the backend
+				serviceName := "opendeploy-app"
+				serviceFile := fmt.Sprintf(`#!/sbin/openrc-run
+
+command="%s"
+command_args="%s"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+directory="%s"
+# Auto-restart on exit
+: ${respawn_delay:=5}
+`, startCmd, project.LocalPort, workDir)
+
+				// Write the OpenRC service file
+				writeServiceCmd := fmt.Sprintf("cat > /etc/init.d/%s << 'EOF'\n%s\nEOF", serviceName, serviceFile)
+				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeServiceCmd)
+
+				// Make it executable
+				chmodCmd := fmt.Sprintf("chmod +x /etc/init.d/%s", serviceName)
+				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, chmodCmd)
+
+				// Enable the service
+				enableCmd := fmt.Sprintf("rc-update add %s default", serviceName)
+				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, enableCmd)
+
+				// Start the service
+				logToDB("stdout", "Starting backend service with OpenRC...")
+				startCmd := fmt.Sprintf("rc-service %s start", serviceName)
+				startResult, startErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, startCmd)
+				if startResult != nil {
+					for _, line := range startResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+				if startErr != nil || (startResult != nil && startResult.ExitCode != 0) {
+					logToDB("stderr", fmt.Sprintf("Failed to start service: %s", startErr))
+					d.failDeploy(deploy, "Failed to start service")
 					return
 				}
-				logToDB("stdout", "Service started")
+				logToDB("stdout", "Service started with OpenRC and configured for auto-restart")
+			} else {
+				// For frontend, configure nginx (already installed)
+				d.broadcastPhase(deployID, "service", "Configuring nginx...")
+				logToDB("stdout", "Installing nginx in container...")
+
+				// Ensure nginx is installed
+				nginxInstallCmd := "apk add --no-cache nginx"
+				nginxInstResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, nginxInstallCmd)
+				if nginxInstResult != nil {
+					for _, line := range nginxInstResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+
+				logToDB("stdout", "Configuring nginx in container...")
+
+				// Determine output directory
+				outputDir := "dist"
+				if project.OutputDir != "" {
+					outputDir = project.OutputDir
+				}
+
+				// Verify build output exists
+				checkBuildCmd := fmt.Sprintf("ls -la %s/%s 2>&1", workDir, outputDir)
+				checkResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, checkBuildCmd)
+				if checkResult != nil {
+					for _, line := range checkResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+
+				// Setup OpenRC for nginx auto-start
+				logToDB("stdout", "Configuring nginx auto-start with OpenRC...")
+				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-update add nginx default")
+				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-service nginx stop") // Stop first
+
+				// Create nginx config
+				nginxSetupCmd := fmt.Sprintf(`
+					mkdir -p /run/nginx && \
+					echo 'server { listen 80; root %s/%s; index index.html; location / { try_files $uri $uri/ /index.html; } }' > /etc/nginx/http.d/default.conf && \
+					nginx -t
+				`, workDir, outputDir)
+
+				nginxResult, nginxErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, nginxSetupCmd)
+				if nginxResult != nil {
+					for _, line := range nginxResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+				if nginxErr != nil || (nginxResult != nil && nginxResult.ExitCode != 0) {
+					logToDB("stderr", fmt.Sprintf("Failed to setup nginx: %s", nginxErr))
+					d.failDeploy(deploy, "Failed to setup nginx")
+					return
+				}
+
+				// Start nginx with OpenRC
+				logToDB("stdout", "Starting nginx with OpenRC...")
+				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-service nginx start")
+				logToDB("stdout", "Nginx configured and started with auto-restart enabled")
 			}
 
 			// Save container info to database
 			container := &state.Container{
 				ProjectID:    project.ID,
 				Name:         containerInfo.Name,
-				Image:        "alpine:3.19",
+				Image:        "images:alpine/3.20",
 				ContainerID:  containerInfo.ID,
 				Status:       "running",
 				PortMappings: fmt.Sprintf(`{"host":"%d","container":"%d"}`, hostPort, containerPort),
@@ -1354,6 +1636,25 @@ func (d *DeployService) failDeploy(deploy *state.Deploy, errMsg string) {
 	deploy.ExitCode = 1
 	d.db.UpdateDeploy(deploy)
 	d.logger.Error("deploy failed", zap.String("deployId", deploy.ID), zap.String("error", errMsg))
+
+	// Cleanup containers on failure to prevent dead weight accumulation
+	if d.lxd != nil && deploy.ProjectID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Get containers for this project
+		containers, _ := d.db.ListContainersByProject(deploy.ProjectID)
+		for _, container := range containers {
+			d.logger.Info("cleaning up container on deploy failure",
+				zap.String("projectId", deploy.ProjectID),
+				zap.String("containerName", container.Name),
+			)
+			// Stop and delete the container
+			d.lxd.StopContainer(ctx, container.ContainerID)
+			d.lxd.DeleteContainer(ctx, container.ContainerID)
+			d.db.DeleteContainer(container.ID)
+		}
+	}
 
 	// Broadcast failure so SSE/WebSocket clients know the deploy ended
 	if d.broadcaster != nil {

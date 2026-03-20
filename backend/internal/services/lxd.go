@@ -190,14 +190,63 @@ func GetStartCommand(framework FrameworkType, dir string) string {
 
 // LXDService handles LXD container-based deployments
 type LXDService struct {
-	runner *exec.Runner
-	cfg    config.DeployConfig
-	db     *state.DB
-	logger *zap.Logger
+	runner      *exec.Runner
+	cfg         config.DeployConfig
+	db          *state.DB
+	logger      *zap.Logger
+	initialized bool
 }
 
 func NewLXDService(runner *exec.Runner, cfg config.DeployConfig, db *state.DB, logger *zap.Logger) *LXDService {
-	return &LXDService{runner: runner, cfg: cfg, db: db, logger: logger}
+	return &LXDService{
+		runner:      runner,
+		cfg:         cfg,
+		db:          db,
+		logger:      logger,
+		initialized: false,
+	}
+}
+
+// EnsureLXDInitialized checks if LXD is initialized and initializes it if needed
+func (l *LXDService) EnsureLXDInitialized(ctx context.Context) error {
+	if l.initialized {
+		return nil
+	}
+
+	// Check if LXD is already initialized
+	result, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_check",
+		Command: "lxc",
+		Args:    []string{"list"},
+		Timeout: 10 * time.Second,
+	})
+
+	if err == nil && result.Success {
+		l.initialized = true
+		l.logger.Info("LXD is already initialized")
+		return nil
+	}
+
+	// LXD not initialized, initialize it automatically
+	l.logger.Info("LXD not initialized, initializing automatically...")
+
+	// Initialize LXD with default settings (non-interactive)
+	initCmd := `lxd init --minimal`
+
+	initResult, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_init",
+		Command: "sh",
+		Args:    []string{"-c", initCmd},
+		Timeout: 2 * time.Minute,
+	})
+
+	if err != nil || !initResult.Success {
+		return fmt.Errorf("failed to initialize LXD: %w", err)
+	}
+
+	l.initialized = true
+	l.logger.Info("LXD initialized successfully")
+	return nil
 }
 
 // ContainerInfo holds information about an LXD container
@@ -212,7 +261,12 @@ type ContainerInfo struct {
 
 // CreateContainer creates an LXD container for a project
 func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName, image string) (*ContainerInfo, error) {
-	containerName := fmt.Sprintf("opendeploy-%s", projectName)
+	// Ensure LXD is initialized
+	if err := l.EnsureLXDInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("LXD initialization failed: %w", err)
+	}
+
+	containerName := fmt.Sprintf("opendeploy-%s-%d", projectName, time.Now().Unix())
 
 	// Check if container already exists
 	existingContainer, _ := l.db.GetContainerByName(containerName)
@@ -249,7 +303,7 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 	result, err := l.runner.Run(ctx, exec.RunOpts{
 		JobType: "lxd_launch",
 		Command: "lxc",
-		Args:    []string{"launch", image, containerName, "-c", "security.nesting=true", "-c", "security.privileged=true"},
+		Args:    []string{"launch", image, containerName},
 		Timeout: 60 * time.Second,
 	})
 
@@ -257,21 +311,11 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
-	// Get container ID from output
-	var containerID string
-	for _, line := range result.Lines {
-		if line.Stream == "stdout" {
-			containerID = strings.TrimSpace(line.Text)
-			break
-		}
-	}
-
-	if containerID == "" {
-		return nil, fmt.Errorf("failed to get container ID")
-	}
+	// Container name is the ID for LXD
+	containerID := containerName
 
 	// Wait for container to be ready
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	// Get container IP
 	ip, err := l.GetContainerIP(ctx, containerID)
@@ -280,6 +324,7 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 			zap.String("containerId", containerID),
 			zap.Error(err),
 		)
+		ip = "" // Continue without IP
 	}
 
 	l.logger.Info("container launched successfully",
@@ -353,6 +398,196 @@ func (l *LXDService) GetContainerIP(ctx context.Context, containerID string) (st
 	}
 
 	return "", fmt.Errorf("no IP found for container")
+}
+
+// InstallDependencies installs base dependencies in the container based on framework
+func (l *LXDService) InstallDependencies(
+	ctx context.Context,
+	containerID string,
+	framework FrameworkType,
+	forFrameworkDetection bool,
+) error {
+	l.logger.Info("installing base dependencies in container",
+		zap.String("containerId", containerID),
+		zap.String("framework", string(framework)),
+		zap.Bool("forFrameworkDetection", forFrameworkDetection),
+	)
+
+	// Determine required packages based on framework
+	// Minimal set - only install what's actually needed
+	var packages []string
+	packages = append(packages, "git", "bash", "curl", "ca-certificates") // Common dependencies
+
+	// Add framework-specific packages
+	switch framework {
+	case FrameworkNode, FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkNestJS,
+		FrameworkExpress, FrameworkFastify, FrameworkReact, FrameworkVue, FrameworkAngular,
+		FrameworkSvelte, FrameworkWebpack, FrameworkVite, FrameworkUnknown:
+		packages = append(packages, "nodejs", "npm")
+	case FrameworkFlask, FrameworkDjango, FrameworkFastAPI:
+		packages = append(packages, "python3", "py3-pip")
+	case FrameworkGo:
+		packages = append(packages, "go")
+	case FrameworkStatic:
+		if forFrameworkDetection {
+			// For framework detection, install all so we can detect anything
+			packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
+		}
+		fallthrough // Static needs nginx, and frontend deployments also need nginx
+	default:
+		// For unknown frameworks or if nginx is needed
+		if forFrameworkDetection {
+			packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
+		}
+	}
+
+	// Add nginx for frontend/static deployments (not backend servers)
+	if !forFrameworkDetection && !IsBackendFramework(framework) {
+		packages = append(packages, "nginx")
+	} else if forFrameworkDetection && framework == FrameworkUnknown {
+		// For detection, add nginx to handle whichever type
+		packages = append(packages, "nginx")
+	}
+
+	// Combine packages into a single apk add command
+	packagesStr := strings.Join(packages, " ")
+	cmd := fmt.Sprintf("apk update && apk add --no-cache %s", packagesStr)
+
+	l.logger.Info("running dependency installation",
+		zap.String("containerId", containerID),
+		zap.String("command", cmd),
+	)
+
+	// Run command
+	result, err := l.RunCommandInContainer(ctx, containerID, cmd)
+	if err != nil {
+		l.logger.Error("failed to run dependency installation command",
+			zap.String("containerId", containerID),
+			zap.Error(err),
+		)
+		return fmt.Errorf("dependency installation command failed: %w", err)
+	}
+
+	// Check if installation succeeded by exit code
+	if result.ExitCode != 0 {
+		l.logger.Error("dependency installation failed with non-zero exit code",
+			zap.String("containerId", containerID),
+			zap.Int("exitCode", result.ExitCode),
+		)
+		for _, line := range result.Lines {
+			l.logger.Error("apk output",
+				zap.String("stream", line.Stream),
+				zap.String("text", line.Text),
+			)
+		}
+		return fmt.Errorf("dependency installation failed with exit code %d", result.ExitCode)
+	}
+
+	l.logger.Info("dependencies installed successfully",
+		zap.String("containerId", containerID),
+		zap.Strings("packages", packages),
+	)
+
+	return nil
+}
+
+// InstallNginxInContainer installs and configures nginx inside the container for full-stack deployments
+func (l *LXDService) InstallNginxInContainer(ctx context.Context, containerID string, backendPort int, frontendPath string) error {
+	l.logger.Info("installing nginx in container",
+		zap.String("containerId", containerID),
+	)
+
+	// Install nginx
+	_, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_install_nginx",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "apk", "add", "nginx"},
+		Timeout: 2 * time.Minute,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to install nginx: %w", err)
+	}
+
+	// Create nginx config for full-stack routing
+	nginxConfig := fmt.Sprintf(`
+server {
+    listen 80;
+    server_name _;
+
+    # Frontend - serve static files
+    location / {
+        root %s;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Backend API - proxy to backend service
+    location /api/ {
+        proxy_pass http://127.0.0.1:%d/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket support
+    location /ws {
+        proxy_pass http://127.0.0.1:%d/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+`, frontendPath, backendPort, backendPort)
+
+	// Write nginx config to container
+	_, err = l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_write_nginx_config",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "sh", "-c", fmt.Sprintf("echo '%s' > /etc/nginx/http.d/default.conf", nginxConfig)},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to write nginx config: %w", err)
+	}
+
+	// Start nginx
+	_, err = l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_start_nginx",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "rc-service", "nginx", "start"},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start nginx: %w", err)
+	}
+
+	// Enable nginx to start on boot
+	_, err = l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_enable_nginx",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "rc-update", "add", "nginx", "default"},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		l.logger.Warn("failed to enable nginx on boot", zap.Error(err))
+	}
+
+	l.logger.Info("nginx installed and configured in container",
+		zap.String("containerId", containerID),
+	)
+
+	return nil
 }
 
 // InstallInContainer runs installation commands inside an LXD container
@@ -495,16 +730,69 @@ func (l *LXDService) CopyFilesToContainer(ctx context.Context, containerID, sour
 		zap.String("dest", destPath),
 	)
 
+	// First, create the destination directory in the container
+	mkdirResult, mkdirErr := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_mkdir",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "mkdir", "-p", destPath},
+		Timeout: 30 * time.Second,
+	})
+
+	if mkdirErr != nil {
+		l.logger.Error("failed to create directory in container",
+			zap.String("containerId", containerID),
+			zap.String("destPath", destPath),
+			zap.Error(mkdirErr),
+		)
+		if mkdirResult != nil {
+			for _, line := range mkdirResult.Lines {
+				l.logger.Error("mkdir output", zap.String("stream", line.Stream), zap.String("text", line.Text))
+			}
+		}
+		return fmt.Errorf("failed to create directory %s in container: %v", destPath, mkdirErr)
+	}
+
+	// Copy files using lxc file push with recursive flag
+	// Format: lxc file push -r /source/path/ containerName/dest/path/
 	result, err := l.runner.Run(ctx, exec.RunOpts{
 		JobType: "lxd_copy",
 		Command: "lxc",
-		Args:    []string{"file", "push", sourcePath, fmt.Sprintf("%s%s", containerID, destPath)},
-		Timeout: 60 * time.Second,
+		Args:    []string{"file", "push", "-r", sourcePath + "/.", containerID + destPath},
+		Timeout: 5 * time.Minute,
 	})
 
 	if err != nil || !result.Success {
-		return fmt.Errorf("failed to copy files: %w", err)
+		l.logger.Error("failed to copy files to container",
+			zap.String("containerId", containerID),
+			zap.String("source", sourcePath),
+			zap.String("dest", destPath),
+			zap.Error(err),
+		)
+
+		// Log all output lines for debugging
+		if result != nil {
+			l.logger.Error("lxc file push details",
+				zap.Int("exitCode", result.ExitCode),
+				zap.Bool("success", result.Success),
+			)
+			for _, line := range result.Lines {
+				l.logger.Error("lxc file push output",
+					zap.String("stream", line.Stream),
+					zap.String("text", line.Text),
+				)
+			}
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to copy files from %s to %s: %v", sourcePath, destPath, err)
+		}
+		return fmt.Errorf("failed to copy files from %s to %s: command failed with exit code %d", sourcePath, destPath, result.ExitCode)
 	}
+
+	l.logger.Info("files copied successfully",
+		zap.String("containerId", containerID),
+		zap.Int("lines", len(result.Lines)),
+	)
 
 	return nil
 }
@@ -528,6 +816,114 @@ func (l *LXDService) RunCommandInContainer(ctx context.Context, containerID, com
 	}
 
 	return result, nil
+}
+
+// DetectFrameworkInContainer detects the framework by examining files inside the container
+func (l *LXDService) DetectFrameworkInContainer(ctx context.Context, containerID, workDir string) FrameworkType {
+	// Comprehensive framework detection using a single shell command
+	cmd := fmt.Sprintf(`
+		cd %s && \
+		if [ -f next.config.js ] || [ -f next.config.mjs ] || [ -f next.config.ts ]; then
+			echo 'nextjs'
+		elif [ -f nuxt.config.js ] || [ -f nuxt.config.ts ]; then
+			echo 'nuxtjs'
+		elif [ -f remix.config.js ]; then
+			echo 'remix'
+		elif [ -f package.json ]; then
+			if grep -q '"nest"' package.json 2>/dev/null || grep -q '"@nestjs/core"' package.json 2>/dev/null; then
+				echo 'nestjs'
+			elif grep -q '"express"' package.json 2>/dev/null; then
+				echo 'express'
+			elif grep -q '"fastify"' package.json 2>/dev/null; then
+				echo 'fastify'
+			elif grep -q '"svelte"' package.json 2>/dev/null; then
+				echo 'svelte'
+			elif grep -q '"@angular/core"' package.json 2>/dev/null; then
+				echo 'angular'
+			elif grep -q '"vue"' package.json 2>/dev/null || grep -q '"vue-router"' package.json 2>/dev/null; then
+				echo 'vue'
+			elif grep -q '"react"' package.json 2>/dev/null || grep -q '"react-dom"' package.json 2>/dev/null; then
+				echo 'react'
+			elif grep -q '"vite"' package.json 2>/dev/null; then
+				echo 'vite'
+			elif grep -q '"webpack"' package.json 2>/dev/null; then
+				echo 'webpack'
+			elif grep -q '"next"' package.json 2>/dev/null; then
+				echo 'nextjs'
+			else
+				echo 'node'
+			fi
+		elif [ -f requirements.txt ]; then
+			if grep -qi 'flask' requirements.txt 2>/dev/null; then
+				echo 'flask'
+			elif grep -qi 'django' requirements.txt 2>/dev/null; then
+				echo 'django'
+			elif grep -qi 'fastapi' requirements.txt 2>/dev/null; then
+				echo 'fastapi'
+			else
+				echo 'python'
+			fi
+		elif [ -f go.mod ]; then
+			echo 'go'
+		elif [ -f index.html ] || [ -f dist/index.html ] || [ -f build/index.html ]; then
+			echo 'static'
+		else
+			echo 'static'
+		fi
+	`, workDir)
+
+	result, err := l.RunCommandInContainer(ctx, containerID, cmd)
+	if err != nil || result == nil || !result.Success {
+		return FrameworkStatic
+	}
+
+	// Parse result
+	for _, line := range result.Lines {
+		if line.Stream == "stdout" {
+			switch strings.TrimSpace(line.Text) {
+			case "nextjs":
+				return FrameworkNextJS
+			case "nuxtjs":
+				return FrameworkNuxtJS
+			case "remix":
+				return FrameworkRemix
+			case "nestjs":
+				return FrameworkNestJS
+			case "express":
+				return FrameworkExpress
+			case "fastify":
+				return FrameworkFastify
+			case "svelte":
+				return FrameworkSvelte
+			case "angular":
+				return FrameworkAngular
+			case "vue":
+				return FrameworkVue
+			case "react":
+				return FrameworkReact
+			case "vite":
+				return FrameworkVite
+			case "webpack":
+				return FrameworkWebpack
+			case "node":
+				return FrameworkNode
+			case "flask":
+				return FrameworkFlask
+			case "django":
+				return FrameworkDjango
+			case "fastapi":
+				return FrameworkFastAPI
+			case "go":
+				return FrameworkGo
+			case "python":
+				return FrameworkFlask
+			case "static":
+				return FrameworkStatic
+			}
+		}
+	}
+
+	return FrameworkStatic
 }
 
 // DetectFramework detects the framework of a project in a directory
