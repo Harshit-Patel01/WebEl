@@ -926,6 +926,66 @@ func (l *LXDService) DetectFrameworkInContainer(ctx context.Context, containerID
 	return FrameworkStatic
 }
 
+// StartAppService starts the OpenRC managed application service in the container
+func (l *LXDService) StartAppService(ctx context.Context, containerID string) error {
+	// Start the OpenRC service
+	_, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app start")
+	return err
+}
+
+// StopAppService stops the OpenRC managed application service in the container
+func (l *LXDService) StopAppService(ctx context.Context, containerID string) error {
+	// Stop the OpenRC service
+	_, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app stop")
+	return err
+}
+
+// RestartAppService restarts the OpenRC managed application service in the container
+func (l *LXDService) RestartAppService(ctx context.Context, containerID string) error {
+	// Restart the OpenRC service
+	_, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app restart")
+	return err
+}
+
+// GetAppServiceStatus gets the status of the application service in the container
+func (l *LXDService) GetAppServiceStatus(ctx context.Context, containerID string) (string, error) {
+	result, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app status")
+	if err != nil {
+		return "unknown", err
+	}
+
+	// Parse status from output
+	for _, line := range result.Lines {
+		if line.Stream == "stdout" {
+			if strings.Contains(line.Text, "started") {
+				return "running", nil
+			} else if strings.Contains(line.Text, "stopped") {
+				return "stopped", nil
+			} else if strings.Contains(line.Text, "crashed") {
+				return "failed", nil
+			}
+		}
+	}
+
+	return "unknown", nil
+}
+
+// GetAppServiceLogs gets the application service logs from the container
+func (l *LXDService) GetAppServiceLogs(ctx context.Context, containerID string, lines int) (string, error) {
+	logCmd := fmt.Sprintf("tail -n %d /var/log/opendeploy-app.log", lines)
+	result, err := l.RunCommandInContainer(ctx, containerID, logCmd)
+	if err != nil {
+		return "", err
+	}
+
+	var logs strings.Builder
+	for _, line := range result.Lines {
+		logs.WriteString(line.Text + "\n")
+	}
+
+	return logs.String(), nil
+}
+
 // DetectFramework detects the framework of a project in a directory
 func (l *LXDService) DetectFramework(projectDir string) FrameworkType {
 	// Check for Next.js
