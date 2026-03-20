@@ -300,7 +300,7 @@ func runStartupHealthChecks(logger *zap.Logger, runner *exec.Runner, avahiSvc *s
 	logger.Info("System health checks completed - backend is ready and self-sufficient")
 }
 
-// runPerformanceOptimization automatically optimizes Docker and system settings for maximum performance
+// runPerformanceOptimization automatically optimizes LXD and system settings for maximum performance
 func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
 	// Wait a bit for system to stabilize
 	time.Sleep(10 * time.Second)
@@ -317,20 +317,19 @@ func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
 		return
 	}
 
-	// 1. Optimize Docker daemon configuration
-	logger.Info("Optimizing Docker daemon configuration")
-	// Docker config: default-ulimits, max-concurrent-downloads/uploads, storage-driver overlay2
+	// 1. Check LXD availability
+	logger.Info("Checking LXD availability")
 	_, err := runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_optimize_config",
-		Command: "sudo",
-		Args:    []string{"tee", "/etc/docker/daemon.json"},
+		JobType: "check_lxd",
+		Command: "lxc",
+		Args:    []string{"version"},
 		Timeout: 10 * time.Second,
 	})
 
 	if err != nil {
-		logger.Warn("Failed to optimize Docker config", zap.Error(err))
+		logger.Warn("LXD not available or not properly installed", zap.Error(err))
 	} else {
-		logger.Info("Docker configuration optimized")
+		logger.Info("LXD is available and accessible")
 	}
 
 	// 2. Set CPU governor to performance
@@ -353,16 +352,16 @@ func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
 		name string
 		cmd  []string
 	}{
-		{"dirty_background_ratio", []string{"echo", "10", ">", "/proc/sys/vm/dirty_background_ratio"}},
-		{"dirty_ratio", []string{"echo", "20", ">", "/proc/sys/vm/dirty_ratio"}},
-		{"swappiness", []string{"echo", "10", ">", "/proc/sys/vm/swappiness"}},
+		{"dirty_background_ratio", []string{"bash", "-c", "echo 10 | sudo tee /proc/sys/vm/dirty_background_ratio"}},
+		{"dirty_ratio", []string{"bash", "-c", "echo 20 | sudo tee /proc/sys/vm/dirty_ratio"}},
+		{"swappiness", []string{"bash", "-c", "echo 10 | sudo tee /proc/sys/vm/swappiness"}},
 	}
 
 	for _, vmCmd := range vmCommands {
 		_, err := runner.Run(ctx, exec.RunOpts{
-			JobType: fmt.Sprintf("vm_optimize_%s", vmCmd.name),
-			Command: "sudo",
-			Args:    vmCmd.cmd,
+			JobType: vmCmd.name,
+			Command: vmCmd.cmd[0],
+			Args:    vmCmd.cmd[1:],
 			Timeout: 5 * time.Second,
 		})
 		if err != nil {
@@ -384,30 +383,30 @@ func runPerformanceOptimization(logger *zap.Logger, runner *exec.Runner) {
 
 	_, err = runner.Run(ctx, exec.RunOpts{
 		JobType: "swap_optimize",
-		Command: "sudo",
-		Args:    []string{"bash", "-c", swapCheckCmd},
+		Command: "bash",
+		Args:    []string{"-c", swapCheckCmd},
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
 		logger.Warn("Failed to optimize swap space", zap.Error(err))
 	}
 
-	// 5. Restart Docker with new settings
-	logger.Info("Restarting Docker with optimized settings")
+	// 5. Ensure LXD daemon is running
+	logger.Info("Ensuring LXD daemon is running")
 	_, err = runner.Run(ctx, exec.RunOpts{
-		JobType: "docker_restart",
+		JobType: "lxd_daemon_status",
 		Command: "sudo",
-		Args:    []string{"systemctl", "restart", "docker"},
+		Args:    []string{"systemctl", "start", "lxd"},
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		logger.Warn("Failed to restart Docker", zap.Error(err))
+		logger.Warn("Failed to start LXD daemon", zap.Error(err))
 	} else {
-		logger.Info("Docker restarted with optimized settings")
+		logger.Info("LXD daemon is running")
 	}
 
 	// 6. Create optimization marker
 	os.WriteFile(optimizationMarker, []byte("Performance optimization completed at "+time.Now().String()), 0644)
 
-	logger.Info("Performance optimization completed - Docker and system optimized for maximum build performance")
+	logger.Info("Performance optimization completed - System optimized for maximum build performance with LXD")
 }
