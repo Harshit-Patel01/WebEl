@@ -48,11 +48,13 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	systemSvc := services.NewSystemService(runner, logger)
 	internetSvc := services.NewInternetService(runner, logger)
 	containerSvc := services.NewContainerService(runner, db, cfg.Deploy, logger)
+	lxdSvc := services.NewLXDService(runner, cfg.Deploy, db, logger)
 	cleanupSvc := services.NewCleanupService(runner, db, cfg.Deploy, logger)
 
 	// Connect services to deploy service
 	deploySvc.SetNginxService(nginxSvc)
 	deploySvc.SetContainerService(containerSvc)
+	deploySvc.SetLXDService(lxdSvc)
 
 	// Run startup cleanup: fix stale deployments and orphan containers
 	go func() {
