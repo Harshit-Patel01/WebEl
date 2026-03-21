@@ -613,7 +613,7 @@ func (l *LXDService) InstallInContainer(ctx context.Context, containerID, instal
 		JobType: "lxd_install",
 		Command: "lxc",
 		Args:    args,
-		Timeout: 10 * time.Minute, // Longer timeout for npm install, etc.
+		Timeout: 10 * time.Minute,
 	})
 
 	if err != nil || !result.Success {
@@ -1192,6 +1192,15 @@ func (l *LXDService) InstallLatestNodeJS(ctx context.Context, containerID string
 		// Get the directory containing node
 		nodeDir := filepath.Dir(hostNodePath)
 
+		// Remove existing device if it exists
+		removeArgs := []string{"config", "device", "remove", containerID, "host-nodejs"}
+		_, _ = l.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_remove_device",
+			Command: "lxc",
+			Args:    removeArgs,
+			Timeout: 5 * time.Second,
+		})
+
 		// Add disk device to bind mount the node directory
 		args := []string{
 			"config", "device", "add", containerID,
@@ -1209,22 +1218,36 @@ func (l *LXDService) InstallLatestNodeJS(ctx context.Context, containerID string
 		})
 
 		if err != nil || !result.Success {
-			l.logger.Warn("failed to bind mount host Node.js, will install in container",
+			l.logger.Warn("failed to bind mount host Node.js, will try install in container",
 				zap.Error(err),
 			)
 			// Fall through to installation method
 		} else {
-			// Verify node is accessible in container
-			verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "node --version")
-			if verifyResult != nil && verifyResult.Success {
-				l.logger.Info("host Node.js successfully mounted in container")
-				return nil
+			// Restart container to apply the mount
+			l.logger.Info("restarting container to apply Node.js mount")
+			restartResult, _ := l.runner.Run(ctx, exec.RunOpts{
+				JobType: "lxd_restart",
+				Command: "lxc",
+				Args:    []string{"restart", containerID},
+				Timeout: 30 * time.Second,
+			})
+
+			if restartResult != nil && restartResult.Success {
+				// Wait a moment for container to be ready
+				time.Sleep(3 * time.Second)
+
+				// Verify node is accessible in container
+				verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "node --version")
+				if verifyResult != nil && verifyResult.Success {
+					l.logger.Info("host Node.js successfully mounted in container")
+					return nil
+				}
 			}
 		}
 	}
 
-	// Fallback: Install Node.js in container
-	l.logger.Info("installing Node.js in container")
+	// Fallback: Install Node.js in container using curl (already installed)
+	l.logger.Info("installing Node.js in container using curl")
 
 	// Install Node.js 22.x LTS from official binary
 	// This is much newer than Alpine's nodejs package (v20.15.1)
@@ -1242,9 +1265,9 @@ else
     exit 1
 fi
 
-# Download and install Node.js 22.x LTS
+# Download and install Node.js 22.x LTS using curl (already installed)
 NODE_VERSION="v22.13.1"
-wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
+curl -fsSLO https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
 tar -xf node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz -C /usr/local --strip-components=1
 rm node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
 
