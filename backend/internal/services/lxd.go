@@ -1141,10 +1141,90 @@ func (l *LXDService) DetectFramework(projectDir string) FrameworkType {
 }
 
 // InstallLatestNodeJS installs the latest Node.js LTS version in the container
+// OR sets up a bind mount to use the host's Node.js installation
 func (l *LXDService) InstallLatestNodeJS(ctx context.Context, containerID string) error {
-	l.logger.Info("installing latest Node.js LTS in container",
+	l.logger.Info("setting up Node.js in container",
 		zap.String("containerId", containerID),
 	)
+
+	// First, try to use host's Node.js via bind mount (most efficient)
+	// Check if host has Node.js installed
+	hostNodePaths := []string{
+		"/usr/bin/node",
+		"/usr/local/bin/node",
+		"/usr/local/node/bin/node",
+		"/opt/node/bin/node",
+	}
+
+	// Try to find node on host
+	var hostNodePath string
+	for _, path := range hostNodePaths {
+		checkCmd := fmt.Sprintf("test -f %s && echo 'found'", path)
+		result, err := l.runner.Run(ctx, exec.RunOpts{
+			JobType: "check_host_node",
+			Command: "/bin/sh",
+			Args:    []string{"-c", checkCmd},
+			Timeout: 5 * time.Second,
+		})
+
+		if err == nil && result.Success {
+			for _, line := range result.Lines {
+				if strings.Contains(line.Text, "found") {
+					hostNodePath = path
+					l.logger.Info("found Node.js on host",
+						zap.String("path", hostNodePath),
+					)
+					break
+				}
+			}
+		}
+		if hostNodePath != "" {
+			break
+		}
+	}
+
+	if hostNodePath != "" {
+		// Use bind mount to share host's Node.js
+		l.logger.Info("using host Node.js via bind mount",
+			zap.String("hostPath", hostNodePath),
+		)
+
+		// Get the directory containing node
+		nodeDir := filepath.Dir(hostNodePath)
+
+		// Add disk device to bind mount the node directory
+		args := []string{
+			"config", "device", "add", containerID,
+			"host-nodejs",
+			"disk",
+			fmt.Sprintf("source=%s", nodeDir),
+			fmt.Sprintf("path=%s", nodeDir),
+		}
+
+		result, err := l.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_mount_nodejs",
+			Command: "lxc",
+			Args:    args,
+			Timeout: 10 * time.Second,
+		})
+
+		if err != nil || !result.Success {
+			l.logger.Warn("failed to bind mount host Node.js, will install in container",
+				zap.Error(err),
+			)
+			// Fall through to installation method
+		} else {
+			// Verify node is accessible in container
+			verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "node --version")
+			if verifyResult != nil && verifyResult.Success {
+				l.logger.Info("host Node.js successfully mounted in container")
+				return nil
+			}
+		}
+	}
+
+	// Fallback: Install Node.js in container
+	l.logger.Info("installing Node.js in container")
 
 	// Install Node.js 22.x LTS from official binary
 	// This is much newer than Alpine's nodejs package (v20.15.1)
