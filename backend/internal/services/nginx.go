@@ -192,7 +192,7 @@ func (n *NginxService) Reload(ctx context.Context) error {
 				errMsg += "\n" + line.Text
 			}
 		}
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 	return nil
 }
