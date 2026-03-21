@@ -1,24 +1,31 @@
 package services
 
 import (
+	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/opendeploy/opendeploy/internal/exec"
 	"github.com/opendeploy/opendeploy/internal/state"
 )
 
 // PortAllocator manages port allocation from a configured pool
 type PortAllocator struct {
 	db        *state.DB
+	runner    *exec.Runner
 	poolStart int
 	poolEnd   int
 	mu        sync.Mutex
 }
 
 // NewPortAllocator creates a new port allocator
-func NewPortAllocator(db *state.DB, poolStart, poolEnd int) *PortAllocator {
+func NewPortAllocator(db *state.DB, runner *exec.Runner, poolStart, poolEnd int) *PortAllocator {
 	return &PortAllocator{
 		db:        db,
+		runner:    runner,
 		poolStart: poolStart,
 		poolEnd:   poolEnd,
 	}
@@ -61,7 +68,7 @@ func (pa *PortAllocator) getAllocatedPorts() (map[int]bool, error) {
 		}
 	}
 
-	// Get ports from containers
+	// Get ports from containers in database
 	containers, err := pa.db.ListAllContainers()
 	if err != nil {
 		return nil, err
@@ -71,6 +78,56 @@ func (pa *PortAllocator) getAllocatedPorts() (map[int]bool, error) {
 		hostPort, _, err := parsePortMapping(c.PortMappings)
 		if err == nil && hostPort > 0 {
 			allocated[hostPort] = true
+		}
+	}
+
+	// IMPORTANT: Also check actual LXD containers for ports
+	// This catches orphaned containers not in the database
+	if pa.runner != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		result, err := pa.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_list_ports",
+			Command: "lxc",
+			Args:    []string{"list", "--format", "csv", "--columns", "n"},
+			Timeout: 10 * time.Second,
+		})
+
+		if err == nil && result.Success {
+			for _, line := range result.Lines {
+				if line.Stream != "stdout" || line.Text == "" {
+					continue
+				}
+				containerName := strings.TrimSpace(line.Text)
+				if !strings.HasPrefix(containerName, "opendeploy-") {
+					continue
+				}
+
+				// Get container config to extract proxy device ports
+				configResult, configErr := pa.runner.Run(ctx, exec.RunOpts{
+					JobType: "lxd_config",
+					Command: "lxc",
+					Args:    []string{"config", "device", "show", containerName},
+					Timeout: 5 * time.Second,
+				})
+
+				if configErr == nil && configResult.Success {
+					// Parse proxy device config to extract listen ports
+					for _, configLine := range configResult.Lines {
+						if configLine.Stream == "stdout" && strings.Contains(configLine.Text, "listen=tcp:") {
+							// Extract port from "listen=tcp:0.0.0.0:8003"
+							parts := strings.Split(configLine.Text, ":")
+							if len(parts) >= 3 {
+								portStr := strings.TrimSpace(parts[len(parts)-1])
+								if port, err := strconv.Atoi(portStr); err == nil && port > 0 {
+									allocated[port] = true
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
