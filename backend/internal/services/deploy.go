@@ -1049,6 +1049,21 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 			logToDB("stdout", "Framework dependencies installed successfully")
 
+			// STEP 5.5: Install latest Node.js for Node-based frameworks
+			if framework == FrameworkNode || framework == FrameworkNextJS || framework == FrameworkNuxtJS ||
+				framework == FrameworkRemix || framework == FrameworkNestJS || framework == FrameworkExpress ||
+				framework == FrameworkFastify || framework == FrameworkReact || framework == FrameworkVue ||
+				framework == FrameworkAngular || framework == FrameworkSvelte || framework == FrameworkWebpack ||
+				framework == FrameworkVite || framework == FrameworkUnknown {
+				logToDB("stdout", "Installing latest Node.js LTS (v22.13.1)...")
+				if err := d.lxd.InstallLatestNodeJS(deployCtx, containerInfo.ID); err != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to install Node.js: %v", err))
+					d.failDeploy(deploy, fmt.Sprintf("Failed to install Node.js: %v", err))
+					return
+				}
+				logToDB("stdout", "Node.js installed successfully")
+			}
+
 			d.logger.Info("detected framework",
 				zap.String("projectId", project.ID),
 				zap.String("framework", string(framework)),

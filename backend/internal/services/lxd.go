@@ -423,7 +423,8 @@ func (l *LXDService) InstallDependencies(
 	case FrameworkNode, FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkNestJS,
 		FrameworkExpress, FrameworkFastify, FrameworkReact, FrameworkVue, FrameworkAngular,
 		FrameworkSvelte, FrameworkWebpack, FrameworkVite, FrameworkUnknown:
-		packages = append(packages, "nodejs", "npm")
+		// Don't install nodejs from Alpine packages - we'll install latest LTS manually
+		// packages = append(packages, "nodejs", "npm")
 	case FrameworkFlask, FrameworkDjango, FrameworkFastAPI:
 		packages = append(packages, "python3", "py3-pip")
 	case FrameworkGo:
@@ -431,13 +432,15 @@ func (l *LXDService) InstallDependencies(
 	case FrameworkStatic:
 		if forFrameworkDetection {
 			// For framework detection, install all so we can detect anything
-			packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
+			// packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
+			packages = append(packages, "python3", "py3-pip", "go")
 		}
 		fallthrough // Static needs nginx, and frontend deployments also need nginx
 	default:
 		// For unknown frameworks or if nginx is needed
 		if forFrameworkDetection {
-			packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
+			// packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
+			packages = append(packages, "python3", "py3-pip", "go")
 		}
 	}
 
@@ -1135,4 +1138,59 @@ func (l *LXDService) DetectFramework(projectDir string) FrameworkType {
 	}
 
 	return FrameworkUnknown
+}
+
+// InstallLatestNodeJS installs the latest Node.js LTS version in the container
+func (l *LXDService) InstallLatestNodeJS(ctx context.Context, containerID string) error {
+	l.logger.Info("installing latest Node.js LTS in container",
+		zap.String("containerId", containerID),
+	)
+
+	// Install Node.js 22.x LTS from official binary
+	// This is much newer than Alpine's nodejs package (v20.15.1)
+	installScript := `
+set -e
+cd /tmp
+# Detect architecture
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ]; then
+    NODE_ARCH="arm64"
+elif [ "$ARCH" = "x86_64" ]; then
+    NODE_ARCH="x64"
+else
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+fi
+
+# Download and install Node.js 22.x LTS
+NODE_VERSION="v22.13.1"
+wget -q https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
+tar -xf node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz -C /usr/local --strip-components=1
+rm node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
+
+# Verify installation
+node --version
+npm --version
+`
+
+	result, err := l.RunCommandInContainer(ctx, containerID, installScript)
+	if err != nil {
+		return fmt.Errorf("failed to install Node.js: %w", err)
+	}
+
+	if result.ExitCode != 0 {
+		var errMsg string
+		for _, line := range result.Lines {
+			if line.Stream == "stderr" {
+				errMsg += line.Text + "\n"
+			}
+		}
+		return fmt.Errorf("Node.js installation failed: %s", errMsg)
+	}
+
+	l.logger.Info("Node.js installed successfully",
+		zap.String("containerId", containerID),
+	)
+
+	return nil
 }
