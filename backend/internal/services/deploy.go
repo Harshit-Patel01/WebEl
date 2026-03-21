@@ -959,21 +959,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				}
 			}
 
-			installCmd := ""
-			if project.InstallCommand != nil && *project.InstallCommand != "" {
-				installCmd = *project.InstallCommand
-			} else {
-				installCmd = GetDefaultInstallCommand(framework)
-			}
-
-			startCmd := ""
-			if isBackend {
-				if project.StartCommand != nil && *project.StartCommand != "" {
-					startCmd = *project.StartCommand
-				} else {
-					startCmd = GetDefaultStartCommand(framework, containerPort)
-				}
-			}
+			// installCmd and startCmd will be set after framework detection below
+			var startCmd string
 
 			// Create LXD container
 			d.broadcastPhase(deployID, "build", "Creating LXD container...")
@@ -1073,11 +1060,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			deploy.IsBackend = IsBackendFramework(framework)
 
 			// Get install and start commands based on detected framework
-			installCmd = ""
+			_ = "" // installCmd not used in this flow, commands run inline
 			if project.InstallCommand != nil && *project.InstallCommand != "" {
-				installCmd = *project.InstallCommand
+				_ = *project.InstallCommand
 			} else {
-				installCmd = GetDefaultInstallCommand(framework)
+				_ = GetDefaultInstallCommand(framework)
 			}
 
 			startCmd = ""
@@ -1123,13 +1110,55 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			d.broadcastPhase(deployID, "build", "Installing project dependencies...")
 			logToDB("stdout", "Installing project dependencies in container...")
 
-			installProjectCmd := fmt.Sprintf("cd %s && %s", workDir, installCmd)
-			installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, installProjectCmd)
-			if installErr != nil || !installResult.Success {
-				logToDB("stderr", fmt.Sprintf("Failed to install project dependencies: %s", installErr))
-				if installResult != nil {
-					for _, line := range installResult.Lines {
-						logToDB(line.Stream, line.Text)
+			// Verify working directory exists
+			lsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("ls -la %s", workDir))
+			if lsResult != nil {
+				logToDB("stdout", "Working directory contents:")
+				for _, line := range lsResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+
+			// Check if package.json exists
+			pkgCheckResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("test -f %s/package.json && echo 'exists' || echo 'not_found'", workDir))
+			if pkgCheckResult != nil {
+				for _, line := range pkgCheckResult.Lines {
+					logToDB("debug", fmt.Sprintf("package.json check: %s", line.Text))
+				}
+			}
+
+			logToDB("stdout", fmt.Sprintf("Running: cd %s && npm install", workDir))
+			// Use simpler npm install command
+			npmInstallCmd := fmt.Sprintf("cd %s && npm install", workDir)
+			installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, npmInstallCmd)
+
+			// Log all npm output
+			if installResult != nil {
+				for _, line := range installResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+
+			// Check for npm errors
+			if installErr != nil || (installResult != nil && installResult.ExitCode != 0) {
+				logToDB("stderr", fmt.Sprintf("npm install failed (exit code: %d)", installResult.ExitCode))
+
+				// Show npm debug log
+				logToDB("stdout", "Fetching npm debug log...")
+				lsLogsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "ls -la /root/.npm/_logs/ 2>&1 || echo 'no logs'")
+				if lsLogsResult != nil {
+					for _, line := range lsLogsResult.Lines {
+						logToDB("debug", line.Text)
+					}
+				}
+
+				// Try to get the latest npm log
+				debugLogCmd := "cat /root/.npm/_logs/*.log 2>&1 | tail -50"
+				debugResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, debugLogCmd)
+				if debugResult != nil {
+					logToDB("stderr", "--- NPM Debug Log ---")
+					for _, line := range debugResult.Lines {
+						logToDB("stderr", line.Text)
 					}
 				}
 				d.failDeploy(deploy, "Failed to install project dependencies")
@@ -1194,11 +1223,30 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 					}
 
 					if buildErr != nil || (buildResult != nil && buildResult.ExitCode != 0) {
-						logToDB("stderr", fmt.Sprintf("Failed to build project: %s", buildErr))
+						logToDB("stderr", fmt.Sprintf("Failed to build project (exit code: %d)", buildResult.ExitCode))
+
+						// Show what's in the directory for debugging
+						lsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("ls -la %s", workDir))
+						if lsResult != nil {
+							logToDB("debug", "[Directory listing]")
+							for _, line := range lsResult.Lines {
+								logToDB("debug", line.Text)
+							}
+						}
+
 						d.failDeploy(deploy, "Failed to build project")
 						return
 					}
 					logToDB("stdout", "Project built successfully")
+
+					// Show what was built
+					findResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("find %s -name 'dist' -o -name 'build' -o -name 'out' 2>/dev/null | head -5", workDir))
+					if findResult != nil {
+						logToDB("debug", "[Build output directories]")
+						for _, line := range findResult.Lines {
+							logToDB("debug", line.Text)
+						}
+					}
 				} else {
 					logToDB("stdout", "No build command for this framework type")
 				}
@@ -1245,26 +1293,46 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 name="opendeploy-app"
 description="OpenDeploy Application"
 command="sh"
-command_args="-c '%s'"
-command_background="yes"
-pidfile="/run/${RC_SVCNAME}.pid"
+command_args="-c %s"
+pidfile="/run/opendeploy-app.pid"
 output_log="/var/log/opendeploy-app.log"
-error_log="/var/log/opendeploy-app.err"
-
-# Auto-restart on exit
 respawn_delay=5
+command_background="yes"
 `, fullStartCommand)
 
+				logToDB("stdout", "Creating OpenRC service file...")
+				logToDB("debug", fmt.Sprintf("Service file content:\n%s", serviceFile))
+
 				// Write the OpenRC service file
-				writeServiceCmd := fmt.Sprintf("cat > /etc/init.d/%s << 'EOF'\n%s\nEOF", serviceName, serviceFile)
-				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeServiceCmd)
+				writeServiceCmd := fmt.Sprintf("cat > /etc/init.d/%s << 'SERVICEEOF'\n%s\nSERVICEEOF", serviceName, serviceFile)
+				writeResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeServiceCmd)
+				if writeResult != nil {
+					for _, line := range writeResult.Lines {
+						logToDB("stdout", line.Text)
+					}
+				}
+
+				// Verify service file was written
+				verifyCmd := fmt.Sprintf("cat /etc/init.d/%s", serviceName)
+				verifyResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, verifyCmd)
+				if verifyResult != nil {
+					logToDB("stdout", "Service file content verification:")
+					for _, line := range verifyResult.Lines {
+						logToDB("stdout", line.Text)
+					}
+				}
 
 				// Make it executable
 				chmodCmd := fmt.Sprintf("chmod +x /etc/init.d/%s", serviceName)
-				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, chmodCmd)
+				chmodResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, chmodCmd)
+				if chmodResult != nil {
+					for _, line := range chmodResult.Lines {
+						logToDB("stdout", line.Text)
+					}
+				}
 
-				logToDB("stdout", "Enabling OpenRC service...")
 				// Enable the service
+				logToDB("stdout", "Enabling OpenRC service for auto-start...")
 				enableCmd := fmt.Sprintf("rc-update add %s default", serviceName)
 				enableResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, enableCmd)
 				if enableResult != nil {
@@ -1273,8 +1341,17 @@ respawn_delay=5
 					}
 				}
 
+				// Check enabled services
+				logToDB("stdout", "Checking enabled services...")
+				listResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-update show default")
+				if listResult != nil {
+					for _, line := range listResult.Lines {
+						logToDB("stdout", line.Text)
+					}
+				}
+
 				// Start the service
-				logToDB("stdout", "Starting backend service with OpenRC...")
+				logToDB("stdout", fmt.Sprintf("Starting backend service: %s", fullStartCommand))
 				startSVC := fmt.Sprintf("rc-service %s start", serviceName)
 				startResult, startErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, startSVC)
 				if startResult != nil {
@@ -1283,7 +1360,22 @@ respawn_delay=5
 					}
 				}
 				if startErr != nil || (startResult != nil && startResult.ExitCode != 0) {
-					logToDB("stderr", fmt.Sprintf("Failed to start service: %s", startErr))
+					// Check service status
+					statusCmd := fmt.Sprintf("rc-service %s status", serviceName)
+					statusResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, statusCmd)
+					if statusResult != nil {
+						for _, line := range statusResult.Lines {
+							logToDB("stdout", line.Text)
+						}
+					}
+					// Show service log
+					logResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "cat /var/log/opendeploy-app.log 2>&1 || echo 'no logs yet'")
+					if logResult != nil {
+						for _, line := range logResult.Lines {
+							logToDB("stdout", line.Text)
+						}
+					}
+					logToDB("stderr", fmt.Sprintf("Failed to start service (exit code: %d)", startResult.ExitCode))
 					d.failDeploy(deploy, "Failed to start service")
 					return
 				}
