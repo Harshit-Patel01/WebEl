@@ -58,7 +58,7 @@ type DeployOptions struct {
 
 func NewDeployService(runner *exec.Runner, db *state.DB, cfg config.DeployConfig, logger *zap.Logger) *DeployService {
 	container := NewContainerService(runner, db, cfg, logger)
-	portAllocator := NewPortAllocator(db, cfg.PortPoolStart, cfg.PortPoolEnd)
+	portAllocator := NewPortAllocator(db, runner, cfg.PortPoolStart, cfg.PortPoolEnd)
 	perfOptimizer := NewPerformanceOptimizer(runner, db, logger)
 	return &DeployService{
 		runner:        runner,

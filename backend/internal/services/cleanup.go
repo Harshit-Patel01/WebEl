@@ -170,19 +170,19 @@ func (c *CleanupService) CleanupOrphanContainers(ctx context.Context) (int, []st
 			zap.String("containerName", containerName),
 		)
 
-		// Stop first, then remove
+		// Stop first with force flag, then remove
 		c.runner.Run(ctx, exec.RunOpts{
 			JobType: "lxd_stop",
 			Command: "lxc",
-			Args:    []string{"stop", containerName},
-			Timeout: 15 * time.Second,
+			Args:    []string{"stop", containerName, "--force"},
+			Timeout: 30 * time.Second,
 		})
 
 		_, rmErr := c.runner.Run(ctx, exec.RunOpts{
 			JobType: "lxd_delete",
 			Command: "lxc",
-			Args:    []string{"delete", "-f", containerName},
-			Timeout: 15 * time.Second,
+			Args:    []string{"delete", "--force", containerName},
+			Timeout: 30 * time.Second,
 		})
 
 		if rmErr != nil {
@@ -330,20 +330,20 @@ func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) er
 			zap.String("containerId", container.ContainerID),
 		)
 
-		// Stop container
+		// Stop container with force flag
 		c.runner.Run(ctx, exec.RunOpts{
 			JobType: "lxd_stop",
 			Command: "lxc",
-			Args:    []string{"stop", container.ContainerID},
+			Args:    []string{"stop", container.ContainerID, "--force"},
 			Timeout: 30 * time.Second,
 		})
 
-		// Remove container from LXD
+		// Remove container from LXD with force flag
 		c.runner.Run(ctx, exec.RunOpts{
 			JobType: "lxd_delete",
 			Command: "lxc",
-			Args:    []string{"delete", "-f", container.ContainerID},
-			Timeout: 15 * time.Second,
+			Args:    []string{"delete", "--force", container.ContainerID},
+			Timeout: 30 * time.Second,
 		})
 
 		// Remove from database

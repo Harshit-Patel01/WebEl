@@ -677,10 +677,29 @@ func (l *LXDService) DeleteContainer(ctx context.Context, containerName string) 
 		zap.String("containerName", containerName),
 	)
 
+	// First, stop the container if it's running
+	l.logger.Info("stopping container before deletion",
+		zap.String("containerName", containerName),
+	)
+
+	stopResult, _ := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_stop",
+		Command: "lxc",
+		Args:    []string{"stop", containerName, "--force"},
+		Timeout: 30 * time.Second,
+	})
+
+	if stopResult != nil && stopResult.Success {
+		l.logger.Info("container stopped successfully",
+			zap.String("containerName", containerName),
+		)
+	}
+
+	// Now delete with force flag
 	result, err := l.runner.Run(ctx, exec.RunOpts{
 		JobType: "lxd_delete",
 		Command: "lxc",
-		Args:    []string{"delete", "-f", containerName},
+		Args:    []string{"delete", "--force", containerName},
 		Timeout: 30 * time.Second,
 	})
 
@@ -715,8 +734,19 @@ func (l *LXDService) SetupPortProxy(ctx context.Context, containerID string, con
 		Timeout: 10 * time.Second,
 	})
 
-	if err != nil || !result.Success {
+	if err != nil {
 		return fmt.Errorf("failed to setup port proxy: %w", err)
+	}
+
+	if !result.Success {
+		// Log the error output
+		var errMsg string
+		for _, line := range result.Lines {
+			if line.Stream == "stderr" {
+				errMsg += line.Text + "\n"
+			}
+		}
+		return fmt.Errorf("failed to setup port proxy: %s", errMsg)
 	}
 
 	return nil
