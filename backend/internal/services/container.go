@@ -308,6 +308,16 @@ func (c *ContainerService) RestartContainerByName(ctx context.Context, container
 		return fmt.Errorf("failed to restart container")
 	}
 
+	// Start supervisord inside the container (it dies when container stops)
+	// Wait briefly for container networking, then start supervisord
+	time.Sleep(2 * time.Second)
+	c.runner.Run(ctx, exec.RunOpts{
+		JobType: "start_supervisord",
+		Command: "lxc",
+		Args:    []string{"exec", container.ContainerID, "--", "/bin/sh", "-c", "pgrep supervisord || supervisord -c /etc/supervisord.conf"},
+		Timeout: 15 * time.Second,
+	})
+
 	// Update status in database
 	container.Status = "running"
 	c.db.UpdateContainer(container)
@@ -352,6 +362,15 @@ func (c *ContainerService) RestartContainer(ctx context.Context, projectID strin
 	if err != nil || !result.Success {
 		return fmt.Errorf("failed to restart container: %v", err)
 	}
+
+	// Start supervisord inside the container (it dies when container stops)
+	time.Sleep(2 * time.Second)
+	c.runner.Run(ctx, exec.RunOpts{
+		JobType: "start_supervisord",
+		Command: "lxc",
+		Args:    []string{"exec", container.ContainerID, "--", "/bin/sh", "-c", "pgrep supervisord || supervisord -c /etc/supervisord.conf"},
+		Timeout: 15 * time.Second,
+	})
 
 	container.Status = "running"
 	c.db.UpdateContainer(container)
@@ -398,18 +417,52 @@ func (c *ContainerService) GetContainerLogs(ctx context.Context, containerID str
 	return []string{}, nil
 }
 
-// RemoveContainer removes a container and its database record
+// RemoveContainer removes all containers for a project and their database records
 func (c *ContainerService) RemoveContainer(ctx context.Context, projectID string) error {
-	container, err := c.db.GetContainerByProjectID(projectID)
-	if err != nil || container == nil {
+	// Find all containers for this project (including full-stack variants)
+	allProjectIDs := []string{projectID, projectID + "-frontend", projectID + "-backend"}
+
+	var allContainers []state.Container
+	for _, pid := range allProjectIDs {
+		containers, err := c.db.ListContainersByProject(pid)
+		if err == nil && len(containers) > 0 {
+			allContainers = append(allContainers, containers...)
+		}
+	}
+
+	if len(allContainers) == 0 {
 		return nil
 	}
 
-	// Stop and remove from LXD
-	c.StopContainer(ctx, projectID)
+	for _, container := range allContainers {
+		lxdName := container.ContainerID
+		c.logger.Info("removing container",
+			zap.String("projectId", projectID),
+			zap.String("containerName", container.Name),
+			zap.String("lxdName", lxdName),
+		)
 
-	// Remove from database
-	return c.db.DeleteContainer(container.ID)
+		// Stop the container
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_stop",
+			Command: "lxc",
+			Args:    []string{"stop", lxdName, "--force"},
+			Timeout: 30 * time.Second,
+		})
+
+		// Delete the container
+		c.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_delete",
+			Command: "lxc",
+			Args:    []string{"delete", "--force", lxdName},
+			Timeout: 30 * time.Second,
+		})
+
+		// Remove from database
+		c.db.DeleteContainer(container.ID)
+	}
+
+	return nil
 }
 
 func (c *ContainerService) ListContainers(projectID string) ([]state.Container, error) {

@@ -45,10 +45,10 @@ func IsBackendFramework(framework FrameworkType) bool {
 	switch framework {
 	case FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkFlask, FrameworkDjango, FrameworkFastAPI, FrameworkGo:
 		return true
-	case FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkReact, FrameworkVue, FrameworkAngular, FrameworkSvelte, FrameworkWebpack, FrameworkVite:
-		return true // These can be backend frameworks too
+	case FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix:
+		return true // SSR frameworks that run a Node.js server
 	default:
-		return false
+		return false // React, Vue, Angular, Svelte, Webpack, Vite, Static — all need nginx
 	}
 }
 
@@ -261,6 +261,13 @@ type ContainerInfo struct {
 
 // CreateContainer creates an LXD container for a project
 func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName, image string) (*ContainerInfo, error) {
+	return l.CreateContainerWithUserData(ctx, projectID, projectName, image, "")
+}
+
+// CreateContainerWithUserData creates an LXD container and runs cloud-init user-data setup before starting.
+// The user-data is a shell script that runs after container creation but before the container is started,
+// so the container is fully ready when returned.
+func (l *LXDService) CreateContainerWithUserData(ctx context.Context, projectID, projectName, image, userData string) (*ContainerInfo, error) {
 	// Ensure LXD is initialized
 	if err := l.EnsureLXDInitialized(ctx); err != nil {
 		return nil, fmt.Errorf("LXD initialization failed: %w", err)
@@ -271,17 +278,15 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 	// Check if container already exists
 	existingContainer, _ := l.db.GetContainerByName(containerName)
 	if existingContainer != nil {
-		// Check if container still exists in LXD
 		status, err := l.GetContainerStatus(ctx, existingContainer.ContainerID)
 		if err == nil && status != "stopped" && status != "unknown" {
 			l.logger.Info("stopping existing container before creating new one",
 				zap.String("projectId", projectID),
 				zap.String("containerName", existingContainer.Name),
 			)
-			l.StopContainer(ctx, containerName)
+			l.StopContainer(ctx, existingContainer.ContainerID)
 		}
 
-		// Remove the old container
 		l.runner.Run(ctx, exec.RunOpts{
 			JobType: "lxd_delete",
 			Command: "lxc",
@@ -289,33 +294,76 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 			Timeout: 30 * time.Second,
 		})
 
-		// Remove from database
 		l.db.DeleteContainer(existingContainer.ID)
 	}
 
-	// Launch new container
-	l.logger.Info("launching lxd container",
+	// Use lxc init to create container without starting (so we can configure before boot)
+	l.logger.Info("initializing lxd container",
 		zap.String("projectId", projectID),
 		zap.String("containerName", containerName),
 		zap.String("image", image),
 	)
 
-	result, err := l.runner.Run(ctx, exec.RunOpts{
-		JobType: "lxd_launch",
+	initResult, initErr := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_init",
 		Command: "lxc",
-		Args:    []string{"launch", image, containerName},
+		Args:    []string{"init", image, containerName},
 		Timeout: 60 * time.Second,
 	})
 
-	if err != nil || !result.Success {
-		return nil, fmt.Errorf("failed to launch container: %w", err)
+	if initErr != nil || (initResult != nil && !initResult.Success) {
+		return nil, fmt.Errorf("failed to init container: %w", initErr)
 	}
 
-	// Container name is the ID for LXD
 	containerID := containerName
 
-	// Wait for container to be ready
-	time.Sleep(3 * time.Second)
+	// Start the container
+	l.logger.Info("starting container", zap.String("containerId", containerID))
+	startResult, startErr := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_start",
+		Command: "lxc",
+		Args:    []string{"start", containerID},
+		Timeout: 30 * time.Second,
+	})
+
+	if startErr != nil || (startResult != nil && !startResult.Success) {
+		return nil, fmt.Errorf("failed to start container: %w", startErr)
+	}
+
+	// Wait for container to be ready and get network
+	time.Sleep(5 * time.Second)
+
+	// Execute user-data setup script if provided
+	// (Alpine doesn't have cloud-init, so we run it directly)
+	if userData != "" {
+		l.logger.Info("running setup script in container",
+			zap.String("containerId", containerID),
+		)
+
+		setupResult, setupErr := l.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_setup",
+			Command: "lxc",
+			Args:    []string{"exec", containerID, "--", "/bin/sh", "-c", userData},
+			Timeout: 10 * time.Minute,
+		})
+
+		if setupErr != nil || (setupResult != nil && !setupResult.Success) {
+			var allOutput string
+			if setupResult != nil {
+				for _, line := range setupResult.Lines {
+					allOutput += fmt.Sprintf("[%s] %s\n", line.Stream, line.Text)
+				}
+			}
+			return nil, fmt.Errorf("container setup failed (exit code: %d):\n%s(error: %v)", func() int {
+				if setupResult != nil {
+					return setupResult.ExitCode
+				}
+				return -1
+			}(), allOutput, setupErr)
+		}
+
+		l.logger.Info("container setup completed", zap.String("containerId", containerID))
+	}
 
 	// Get container IP
 	ip, err := l.GetContainerIP(ctx, containerID)
@@ -324,7 +372,7 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 			zap.String("containerId", containerID),
 			zap.Error(err),
 		)
-		ip = "" // Continue without IP
+		ip = ""
 	}
 
 	l.logger.Info("container launched successfully",
@@ -419,28 +467,25 @@ func (l *LXDService) InstallDependencies(
 	packages = append(packages, "git", "bash", "curl", "ca-certificates") // Common dependencies
 
 	// Add framework-specific packages
+	// Runtime tools (node, python, go) are provided via host bind mounts, not installed in container
 	switch framework {
 	case FrameworkNode, FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkNestJS,
 		FrameworkExpress, FrameworkFastify, FrameworkReact, FrameworkVue, FrameworkAngular,
 		FrameworkSvelte, FrameworkWebpack, FrameworkVite, FrameworkUnknown:
-		// Don't install nodejs from Alpine packages - we'll install latest LTS manually
-		// packages = append(packages, "nodejs", "npm")
+		// Node.js/npm provided via host bind mount
 	case FrameworkFlask, FrameworkDjango, FrameworkFastAPI:
-		packages = append(packages, "python3", "py3-pip")
+		// Python provided via host bind mount
 	case FrameworkGo:
-		packages = append(packages, "go")
+		// Go provided via host bind mount
 	case FrameworkStatic:
 		if forFrameworkDetection {
-			// For framework detection, install all so we can detect anything
-			// packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
-			packages = append(packages, "python3", "py3-pip", "go")
+			// For framework detection, runtime tools come from host bind mounts
 		}
 		fallthrough // Static needs nginx, and frontend deployments also need nginx
 	default:
 		// For unknown frameworks or if nginx is needed
 		if forFrameworkDetection {
-			// packages = append(packages, "nodejs", "npm", "python3", "py3-pip", "go")
-			packages = append(packages, "python3", "py3-pip", "go")
+			// Runtime tools come from host bind mounts
 		}
 	}
 
@@ -1140,160 +1185,238 @@ func (l *LXDService) DetectFramework(projectDir string) FrameworkType {
 	return FrameworkUnknown
 }
 
-// InstallLatestNodeJS installs the latest Node.js LTS version in the container
-// OR sets up a bind mount to use the host's Node.js installation
-func (l *LXDService) InstallLatestNodeJS(ctx context.Context, containerID string) error {
-	l.logger.Info("setting up Node.js in container",
-		zap.String("containerId", containerID),
-	)
+// hostBinaryInfo describes a binary on the host to bind mount into the container
+type hostBinaryInfo struct {
+	binary       string // e.g. "node"
+	hostPath     string // full path on host, e.g. "/usr/local/bin/node"
+	containerDir string // target dir in container, e.g. "/usr/local/bin"
+}
 
-	// First, try to use host's Node.js via bind mount (most efficient)
-	// Check if host has Node.js installed
-	hostNodePaths := []string{
-		"/usr/bin/node",
-		"/usr/local/bin/node",
-		"/usr/local/node/bin/node",
-		"/opt/node/bin/node",
-	}
-
-	// Try to find node on host
-	var hostNodePath string
-	for _, path := range hostNodePaths {
+// findHostBinary checks if a binary exists on the host at any of the given paths
+func (l *LXDService) findHostBinary(ctx context.Context, candidates []string) (string, error) {
+	for _, path := range candidates {
 		checkCmd := fmt.Sprintf("test -f %s && echo 'found'", path)
 		result, err := l.runner.Run(ctx, exec.RunOpts{
-			JobType: "check_host_node",
+			JobType: "check_host_binary",
 			Command: "/bin/sh",
 			Args:    []string{"-c", checkCmd},
 			Timeout: 5 * time.Second,
 		})
-
 		if err == nil && result.Success {
 			for _, line := range result.Lines {
 				if strings.Contains(line.Text, "found") {
-					hostNodePath = path
-					l.logger.Info("found Node.js on host",
-						zap.String("path", hostNodePath),
-					)
-					break
-				}
-			}
-		}
-		if hostNodePath != "" {
-			break
-		}
-	}
-
-	if hostNodePath != "" {
-		// Use bind mount to share host's Node.js
-		l.logger.Info("using host Node.js via bind mount",
-			zap.String("hostPath", hostNodePath),
-		)
-
-		// Get the directory containing node
-		nodeDir := filepath.Dir(hostNodePath)
-
-		// Remove existing device if it exists
-		removeArgs := []string{"config", "device", "remove", containerID, "host-nodejs"}
-		_, _ = l.runner.Run(ctx, exec.RunOpts{
-			JobType: "lxd_remove_device",
-			Command: "lxc",
-			Args:    removeArgs,
-			Timeout: 5 * time.Second,
-		})
-
-		// Add disk device to bind mount the node directory
-		args := []string{
-			"config", "device", "add", containerID,
-			"host-nodejs",
-			"disk",
-			fmt.Sprintf("source=%s", nodeDir),
-			fmt.Sprintf("path=%s", nodeDir),
-		}
-
-		result, err := l.runner.Run(ctx, exec.RunOpts{
-			JobType: "lxd_mount_nodejs",
-			Command: "lxc",
-			Args:    args,
-			Timeout: 10 * time.Second,
-		})
-
-		if err != nil || !result.Success {
-			l.logger.Warn("failed to bind mount host Node.js, will try install in container",
-				zap.Error(err),
-			)
-			// Fall through to installation method
-		} else {
-			// Restart container to apply the mount
-			l.logger.Info("restarting container to apply Node.js mount")
-			restartResult, _ := l.runner.Run(ctx, exec.RunOpts{
-				JobType: "lxd_restart",
-				Command: "lxc",
-				Args:    []string{"restart", containerID},
-				Timeout: 30 * time.Second,
-			})
-
-			if restartResult != nil && restartResult.Success {
-				// Wait a moment for container to be ready
-				time.Sleep(3 * time.Second)
-
-				// Verify node is accessible in container
-				verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "node --version")
-				if verifyResult != nil && verifyResult.Success {
-					l.logger.Info("host Node.js successfully mounted in container")
-					return nil
+					return path, nil
 				}
 			}
 		}
 	}
+	return "", fmt.Errorf("binary not found on host")
+}
 
-	// Fallback: Install Node.js in container using curl (already installed)
-	l.logger.Info("installing Node.js in container using curl")
+// BindMountHostDir mounts a host directory into the container as an LXD disk device
+// and creates symlinks for individual binaries. Uses live bind mount (no file copying).
+func (l *LXDService) BindMountHostDir(ctx context.Context, containerID, sourceDir, mountPoint string, symlinkTargets []string) error {
+	deviceName := fmt.Sprintf("host-runtime-%s", strings.TrimPrefix(mountPoint, "/"))
 
-	// Install Node.js 22.x LTS from official binary
-	// This is much newer than Alpine's nodejs package (v20.15.1)
-	installScript := `
-set -e
-cd /tmp
-# Detect architecture
-ARCH=$(uname -m)
-if [ "$ARCH" = "aarch64" ]; then
-    NODE_ARCH="arm64"
-elif [ "$ARCH" = "x86_64" ]; then
-    NODE_ARCH="x64"
-else
-    echo "Unsupported architecture: $ARCH"
-    exit 1
-fi
-
-# Download and install Node.js 22.x LTS using curl (already installed)
-NODE_VERSION="v22.13.1"
-curl -fsSLO https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
-tar -xf node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz -C /usr/local --strip-components=1
-rm node-${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz
-
-# Verify installation
-node --version
-npm --version
-`
-
-	result, err := l.RunCommandInContainer(ctx, containerID, installScript)
-	if err != nil {
-		return fmt.Errorf("failed to install Node.js: %w", err)
-	}
-
-	if result.ExitCode != 0 {
-		var errMsg string
-		for _, line := range result.Lines {
-			if line.Stream == "stderr" {
-				errMsg += line.Text + "\n"
-			}
-		}
-		return fmt.Errorf("Node.js installation failed: %s", errMsg)
-	}
-
-	l.logger.Info("Node.js installed successfully",
+	l.logger.Info("adding LXD disk device for host bind mount",
 		zap.String("containerId", containerID),
+		zap.String("sourceDir", sourceDir),
+		zap.String("mountPoint", mountPoint),
+		zap.String("deviceName", deviceName),
+	)
+
+	// Create mount point directory inside container
+	l.RunCommandInContainer(ctx, containerID, fmt.Sprintf("mkdir -p %s", mountPoint))
+
+	// Add disk device using LXD's proper device mechanism - this is a live bind mount, no file copying
+	result, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_add_disk_device",
+		Command: "lxc",
+		Args: []string{
+			"config", "device", "add", containerID,
+			deviceName,
+			"disk",
+			fmt.Sprintf("source=%s", sourceDir),
+			fmt.Sprintf("path=%s", mountPoint),
+			"readonly=true",
+		},
+		Timeout: 30 * time.Second,
+	})
+
+	if err != nil || (result != nil && !result.Success) {
+		var errMsg string
+		if result != nil {
+			for _, line := range result.Lines {
+				if line.Stream == "stderr" {
+					errMsg += line.Text + "\n"
+				}
+			}
+		}
+		return fmt.Errorf("failed to add disk device: %s (error: %v)", errMsg, err)
+	}
+
+	// Restart container to apply the mount
+	l.logger.Info("restarting container to apply disk device mount")
+	_, restartErr := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_restart",
+		Command: "lxc",
+		Args:    []string{"restart", containerID},
+		Timeout: 30 * time.Second,
+	})
+	if restartErr != nil {
+		return fmt.Errorf("failed to restart container after adding disk device: %w", restartErr)
+	}
+
+	time.Sleep(3 * time.Second)
+
+	// Create symlinks for requested binaries
+	for _, binName := range symlinkTargets {
+		srcPath := filepath.Join(mountPoint, binName)
+		dstPath := filepath.Join("/usr/local/bin", binName)
+		l.RunCommandInContainer(ctx, containerID, fmt.Sprintf("ln -sf %s %s", srcPath, dstPath))
+	}
+
+	l.logger.Info("LXD disk device mount applied",
+		zap.String("containerId", containerID),
+		zap.String("sourceDir", sourceDir),
+		zap.String("mountPoint", mountPoint),
 	)
 
 	return nil
+}
+
+// BindMountHostNodeJS downloads and installs Node.js LTS inside the container from nodejs.org.
+// Alpine's apk packages are often too old, so we download the official binary directly.
+func (l *LXDService) BindMountHostNodeJS(ctx context.Context, containerID string) error {
+	l.logger.Info("downloading Node.js LTS into container",
+		zap.String("containerId", containerID),
+	)
+
+	// Download Node.js LTS (v22.x) for linux-arm64 (matches the aarch64 Alpine container)
+	nodeVersion := "v22.16.0"
+	nodeURL := fmt.Sprintf("https://nodejs.org/dist/%s/node-%s-linux-arm64.tar.xz", nodeVersion, nodeVersion)
+
+	// Install tar and xz for extraction, then download and install
+	installCmd := fmt.Sprintf(
+		"apk add --no-cache tar xz && "+
+			"cd /tmp && "+
+			"curl -fsSL -o node.tar.xz '%s' && "+
+			"tar -xJf node.tar.xz && "+
+			"cp -a node-%s-linux-arm64/bin/* /usr/local/bin/ && "+
+			"cp -a node-%s-linux-arm64/lib/* /usr/local/lib/ && "+
+			"cp -a node-%s-linux-arm64/include/* /usr/local/include/ 2>/dev/null; "+
+			"rm -rf node.tar.xz node-%s-linux-arm64",
+		nodeURL, nodeVersion, nodeVersion, nodeVersion, nodeVersion,
+	)
+
+	result, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "install_nodejs",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "/bin/sh", "-c", installCmd},
+		Timeout: 5 * time.Minute,
+	})
+
+	if err != nil || (result != nil && !result.Success) {
+		var errMsg string
+		if result != nil {
+			for _, line := range result.Lines {
+				if line.Stream == "stderr" {
+					errMsg += line.Text + "\n"
+				}
+			}
+		}
+		return fmt.Errorf("failed to install Node.js: %s (error: %v)", errMsg, err)
+	}
+
+	// Verify node works
+	verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "node --version")
+	if verifyResult != nil {
+		for _, line := range verifyResult.Lines {
+			if line.Stream == "stdout" && strings.Contains(line.Text, "v") {
+				l.logger.Info("Node.js installed successfully",
+					zap.String("version", strings.TrimSpace(line.Text)),
+				)
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("Node.js installation verification failed")
+}
+
+// BindMountHostPython installs Python natively inside the container via apk.
+func (l *LXDService) BindMountHostPython(ctx context.Context, containerID string) error {
+	l.logger.Info("installing Python in container via apk",
+		zap.String("containerId", containerID),
+	)
+
+	result, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "apk_install_python",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "apk", "add", "--no-cache", "python3", "py3-pip"},
+		Timeout: 120 * time.Second,
+	})
+
+	if err != nil || (result != nil && !result.Success) {
+		var errMsg string
+		if result != nil {
+			for _, line := range result.Lines {
+				if line.Stream == "stderr" {
+					errMsg += line.Text + "\n"
+				}
+			}
+		}
+		return fmt.Errorf("failed to install Python: %s (error: %v)", errMsg, err)
+	}
+
+	verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "python3 --version")
+	if verifyResult != nil && verifyResult.Success {
+		l.logger.Info("Python installed successfully")
+		return nil
+	}
+
+	return fmt.Errorf("Python installation verification failed")
+}
+
+// BindMountHostGo installs Go natively inside the container via apk.
+func (l *LXDService) BindMountHostGo(ctx context.Context, containerID string) error {
+	l.logger.Info("installing Go in container via apk",
+		zap.String("containerId", containerID),
+	)
+
+	result, err := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "apk_install_go",
+		Command: "lxc",
+		Args:    []string{"exec", containerID, "--", "apk", "add", "--no-cache", "go"},
+		Timeout: 120 * time.Second,
+	})
+
+	if err != nil || (result != nil && !result.Success) {
+		var errMsg string
+		if result != nil {
+			for _, line := range result.Lines {
+				if line.Stream == "stderr" {
+					errMsg += line.Text + "\n"
+				}
+			}
+		}
+		return fmt.Errorf("failed to install Go: %s (error: %v)", errMsg, err)
+	}
+
+	verifyResult, _ := l.RunCommandInContainer(ctx, containerID, "go version")
+	if verifyResult != nil && verifyResult.Success {
+		l.logger.Info("Go installed successfully")
+		return nil
+	}
+
+	return fmt.Errorf("Go installation verification failed")
+}
+
+// InstallLatestNodeJS installs Node.js natively inside the container via apk.
+func (l *LXDService) InstallLatestNodeJS(ctx context.Context, containerID string) error {
+	l.logger.Info("installing Node.js in container",
+		zap.String("containerId", containerID),
+	)
+
+	return l.BindMountHostNodeJS(ctx, containerID)
 }
