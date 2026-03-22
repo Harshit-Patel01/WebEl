@@ -26,6 +26,61 @@ const (
 	ProjectStatic ProjectType = "static"
 )
 
+// networkWait waits for container network/DNS to be ready before installing packages.
+const networkWait = `
+for i in $(seq 1 30); do
+  ping -c1 -W1 dl-cdn.alpinelinux.org >/dev/null 2>&1 && break
+  sleep 1
+done
+`
+
+// frontendSetupScript sets up a container for frontend projects (React, Vue, Angular, etc).
+// Includes nginx and supervisor for process management.
+const frontendSetupScript = `set -e` + networkWait + `
+apk update && apk add --no-cache nodejs npm git bash ca-certificates nginx supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d
+supervisord -c /etc/supervisord.conf
+which node || apk add --no-cache nodejs
+which npm || apk add --no-cache npm
+node --version
+npm --version
+`
+
+// nodejsSetupScript sets up a container for Node.js projects (backend and frontend).
+const nodejsSetupScript = `set -e` + networkWait + `
+apk update && apk add --no-cache nodejs npm git bash ca-certificates nginx supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d
+supervisord -c /etc/supervisord.conf
+which node || apk add --no-cache nodejs
+which npm || apk add --no-cache npm
+node --version
+npm --version
+`
+
+// pythonSetupScript sets up a container for Python projects (Flask, Django, FastAPI).
+const pythonSetupScript = `set -e` + networkWait + `
+apk update && apk add --no-cache python3 py3-pip git bash ca-certificates supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d
+supervisord -c /etc/supervisord.conf
+python3 --version
+`
+
+// goSetupScript sets up a container for Go projects.
+const goSetupScript = `set -e` + networkWait + `
+apk update && apk add --no-cache go git bash ca-certificates supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d
+supervisord -c /etc/supervisord.conf
+go version
+`
+
+// staticSetupScript sets up a container for static HTML/CSS/JS sites.
+const staticSetupScript = `set -e` + networkWait + `
+apk update && apk add --no-cache git bash ca-certificates nginx supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d
+supervisord -c /etc/supervisord.conf
+nginx -v
+`
+
 type CommitInfo struct {
 	Hash      string `json:"hash"`
 	Subject   string `json:"subject"`
@@ -624,9 +679,9 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// ==================== FRONTEND CONTAINER ====================
 			d.broadcastPhase(deployID, "build", "Creating frontend container...")
-			logToDB("stdout", "Creating LXD container for frontend...")
+			logToDB("stdout", "Creating LXD container for frontend (nodejs + nginx)...")
 
-			frontendContainerInfo, frontendErr := d.lxd.CreateContainer(deployCtx, project.ID+"-frontend", project.Name+"-frontend", "images:alpine/3.20")
+			frontendContainerInfo, frontendErr := d.lxd.CreateContainerWithUserData(deployCtx, project.ID+"-frontend", project.Name+"-frontend", "images:alpine/3.23", frontendSetupScript)
 			if frontendErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create frontend container: %s", frontendErr.Error()))
 				d.failDeploy(deploy, frontendErr.Error())
@@ -635,7 +690,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			logToDB("stdout", fmt.Sprintf("Frontend container created: %s (ID: %s)", frontendContainerInfo.Name, frontendContainerInfo.ID))
 
-			// Clone repository in frontend container FIRST
+			// Clone repository in frontend container (deps already installed)
 			logToDB("stdout", "Cloning repository in frontend container...")
 			frontendCloneCmd := fmt.Sprintf("mkdir -p /app && cd /app && git clone --branch %s --depth 1 %s repo", project.Branch, project.RepoURL)
 			if _, err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, frontendCloneCmd); err != nil {
@@ -644,45 +699,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				return
 			}
 			logToDB("stdout", "Repository cloned in frontend container")
-
-			// Install base dependencies first (git, node, npm, nginx, etc.)
-			d.broadcastPhase(deployID, "build", "Installing base dependencies...")
-			logToDB("stdout", "Installing base dependencies in frontend container...")
-
-			// Install minimal deps then framework-specific for frontend
-			minimalDepsCmd := "apk update && apk add --no-cache git curl bash ca-certificates"
-			minimalResult, _ := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, minimalDepsCmd)
-			if minimalResult != nil && minimalResult.ExitCode != 0 {
-				logToDB("stderr", "Failed to install minimal dependencies")
-				for _, line := range minimalResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-				d.failDeploy(deploy, "Failed to install minimal dependencies")
-				return
-			}
-			if minimalResult != nil {
-				for _, line := range minimalResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
-
-			// Install Node.js, npm, and nginx for frontend
-			nodeDepsCmd := "apk add --no-cache nodejs npm nginx"
-			nodeResult, _ := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, nodeDepsCmd)
-			if nodeResult != nil && nodeResult.ExitCode != 0 {
-				logToDB("stderr", "Failed to install Node.js and nginx")
-				for _, line := range nodeResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-				d.failDeploy(deploy, "Failed to install Node.js and nginx")
-				return
-			}
-			if nodeResult != nil {
-				for _, line := range nodeResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
-			logToDB("stdout", "Base dependencies installed successfully")
 
 			// Allocate frontend port
 			frontendHostPort, frontendPortErr := d.portAllocator.AllocatePort("frontend")
@@ -704,38 +720,66 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			d.broadcastPhase(deployID, "build", "Building frontend...")
 			logToDB("stdout", "Building frontend...")
 			frontendWorkDir := fmt.Sprintf("/app/repo/%s", frontendDir)
-			frontendBuildCmd := fmt.Sprintf("cd %s && npm install --prefer-offline --no-audit && npm run build", frontendWorkDir)
-			if _, err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, frontendBuildCmd); err != nil {
-				logToDB("stderr", fmt.Sprintf("Frontend build failed: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
+			frontendBuildCmd := "npm install --legacy-peer-deps --prefer-offline --no-audit && npm run build"
+			frontendBuildResult, frontendBuildErr := d.lxd.RunCommandInContainerWithOptions(deployCtx, frontendContainerInfo.ID, frontendBuildCmd, ExecOptions{
+				WorkDir: frontendWorkDir,
+				Timeout: 15 * time.Minute,
+			})
+			if frontendBuildResult != nil {
+				for _, line := range frontendBuildResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			if frontendBuildErr != nil || (frontendBuildResult != nil && frontendBuildResult.ExitCode != 0) {
+				logToDB("stderr", "Frontend build failed")
+				d.failDeploy(deploy, "Frontend build failed")
 				return
 			}
 
-			// Configure nginx for frontend (already installed with base deps)
+			// Configure nginx for frontend via supervisor
 			logToDB("stdout", "Configuring nginx in frontend container...")
 			frontendOutputPath := fmt.Sprintf("/app/repo/%s/dist", frontendDir)
 			if project.OutputDir != "" {
 				frontendOutputPath = fmt.Sprintf("/app/repo/%s/%s", frontendDir, project.OutputDir)
 			}
 
-			nginxSetupCmd := fmt.Sprintf(`
-				mkdir -p /run/nginx && \
-				echo 'server { listen 80; root %s; index index.html; location / { try_files $uri $uri/ /index.html; } }' > /etc/nginx/http.d/default.conf && \
-				nginx -t && nginx -g 'daemon off;' >/dev/null 2>&1 &
-			`, frontendOutputPath)
+			nginxSetupCmd := fmt.Sprintf(
+				"mkdir -p /run/nginx /var/log/supervisor && "+
+					"rm -f /etc/nginx/http.d/default.conf && "+
+					"printf 'server {\\n  listen 80;\\n  root %s;\\n  index index.html;\\n  location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
+					"nginx -t && "+
+					"printf '[program:nginx]\\ncommand=/usr/sbin/nginx -g \"daemon off;\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/nginx.log\\nstderr_logfile=/var/log/supervisor/nginx-err.log\\n' > /etc/supervisor.d/nginx.ini && "+
+					"rm -f /etc/supervisor.d/app.ini && "+
+					"supervisorctl reread && supervisorctl update && supervisorctl start nginx",
+				frontendOutputPath,
+			)
 
-			if _, err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, nginxSetupCmd); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to setup nginx in frontend container: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
+			nginxResult, nginxErr := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, nginxSetupCmd)
+			if nginxResult != nil {
+				for _, line := range nginxResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			if nginxErr != nil || (nginxResult != nil && nginxResult.ExitCode != 0) {
+				logToDB("stderr", "Failed to setup nginx via supervisor")
+				d.failDeploy(deploy, "Failed to setup nginx")
 				return
 			}
-			logToDB("stdout", "Frontend container ready")
+			logToDB("stdout", "Frontend container ready (nginx serving build output)")
+
+			// Configure frontend container to auto-start on boot
+			d.runner.Run(deployCtx, exec.RunOpts{
+				JobType: "lxd_autostart",
+				Command: "lxc",
+				Args:    []string{"config", "set", frontendContainerInfo.ID, "boot.autostart", "true"},
+				Timeout: 10 * time.Second,
+			})
 
 			// ==================== BACKEND CONTAINER ====================
-			d.broadcastPhase(deployID, "build", "Creating backend container...")
+			d.broadcastPhase(deployID, "build", "Creating backend container (with Node.js)...")
 			logToDB("stdout", "Creating LXD container for backend...")
 
-			backendContainerInfo, backendErr := d.lxd.CreateContainer(deployCtx, project.ID+"-backend", project.Name+"-backend", "images:alpine/3.20")
+			backendContainerInfo, backendErr := d.lxd.CreateContainerWithUserData(deployCtx, project.ID+"-backend", project.Name+"-backend", "images:alpine/3.23", nodejsSetupScript)
 			if backendErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create backend container: %s", backendErr.Error()))
 				d.failDeploy(deploy, backendErr.Error())
@@ -743,45 +787,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 
 			logToDB("stdout", fmt.Sprintf("Backend container created: %s (ID: %s)", backendContainerInfo.Name, backendContainerInfo.ID))
-
-			// Install base dependencies FIRST
-			d.broadcastPhase(deployID, "build", "Installing base dependencies...")
-			logToDB("stdout", "Installing base dependencies in backend container...")
-
-			// Install minimal deps first
-			backendMinDepsCmd := "apk update && apk add --no-cache git curl bash ca-certificates"
-			backendMinResult, _ := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, backendMinDepsCmd)
-			if backendMinResult != nil && backendMinResult.ExitCode != 0 {
-				logToDB("stderr", "Failed to install minimal dependencies")
-				for _, line := range backendMinResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-				d.failDeploy(deploy, "Failed to install minimal dependencies")
-				return
-			}
-			if backendMinResult != nil {
-				for _, line := range backendMinResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
-
-			// Install backend deps (Node.js, Python, Go)
-			backendDepsCmd := "apk add --no-cache nodejs npm python3 py3-pip go"
-			backendResult, _ := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, backendDepsCmd)
-			if backendResult != nil && backendResult.ExitCode != 0 {
-				logToDB("stderr", "Failed to install backend dependencies")
-				for _, line := range backendResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-				d.failDeploy(deploy, "Failed to install backend dependencies")
-				return
-			}
-			if backendResult != nil {
-				for _, line := range backendResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
-			logToDB("stdout", "Base dependencies installed successfully")
 
 			// Allocate backend port
 			backendHostPort, backendPortErr := d.portAllocator.AllocatePort("backend")
@@ -810,8 +815,10 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// Install backend dependencies
 			backendWorkDir := fmt.Sprintf("/app/repo/%s", backendDir)
-			installBackendCmd := fmt.Sprintf("cd %s && %s", backendWorkDir, backendInstallCmd)
-			if _, err := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, installBackendCmd); err != nil {
+			if _, err := d.lxd.RunCommandInContainerWithOptions(deployCtx, backendContainerInfo.ID, backendInstallCmd, ExecOptions{
+				WorkDir: backendWorkDir,
+				Timeout: 15 * time.Minute,
+			}); err != nil {
 				logToDB("stderr", fmt.Sprintf("Backend installation failed: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
 				return
@@ -837,20 +844,31 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, writeEnvCmd)
 			}
 
-			// Start backend service
-			startBackendCmd := fmt.Sprintf("cd %s && nohup %s > /var/log/app.log 2>&1 &", backendWorkDir, startCmd)
-			if _, err := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, startBackendCmd); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to start backend: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
+			// Start backend service via supervisor
+			logToDB("stdout", "Configuring backend service with supervisor...")
+			supervisorConfig := fmt.Sprintf(
+				"printf '[program:app]\\ndirectory=%s\\ncommand=/bin/sh -c \"%s\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/app.log\\nstderr_logfile=/var/log/supervisor/app-err.log\\n' > /etc/supervisor.d/app.ini && "+
+					"supervisorctl reread && supervisorctl update && supervisorctl start app",
+				backendWorkDir, startCmd,
+			)
+			svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, supervisorConfig)
+			if svcResult != nil {
+				for _, line := range svcResult.Lines {
+					logToDB(line.Stream, line.Text)
+				}
+			}
+			if svcErr != nil || (svcResult != nil && svcResult.ExitCode != 0) {
+				logToDB("stderr", "Failed to start backend via supervisor")
+				d.failDeploy(deploy, "Failed to start backend service")
 				return
 			}
-			logToDB("stdout", "Backend service started")
+			logToDB("stdout", "Backend service started (managed by supervisor)")
 
 			// Save both containers to database
 			frontendContainer := &state.Container{
 				ProjectID:    project.ID,
 				Name:         frontendContainerInfo.Name,
-				Image:        "images:alpine/3.20",
+				Image:        "images:alpine/3.23",
 				ContainerID:  frontendContainerInfo.ID,
 				Status:       "running",
 				PortMappings: fmt.Sprintf(`{"host":"%d","container":"80"}`, frontendHostPort),
@@ -860,7 +878,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			backendContainer := &state.Container{
 				ProjectID:    project.ID,
 				Name:         backendContainerInfo.Name,
-				Image:        "images:alpine/3.20",
+				Image:        "images:alpine/3.23",
 				ContainerID:  backendContainerInfo.ID,
 				Status:       "running",
 				PortMappings: fmt.Sprintf(`{"host":"%d","container":"%d"}`, backendHostPort, backendContainerPort),
@@ -962,9 +980,27 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// installCmd and startCmd will be set after framework detection below
 			var startCmd string
 
-			// Create LXD container
-			d.broadcastPhase(deployID, "build", "Creating LXD container...")
-			containerInfo, containerErr := d.lxd.CreateContainer(deployCtx, project.ID, project.Name, "images:alpine/3.20")
+			// Pick the right setup script based on project type
+			setupScript := nodejsSetupScript
+			setupLabel := "nodejs"
+			switch projectType {
+			case ProjectNode:
+				setupScript = nodejsSetupScript
+				setupLabel = "nodejs"
+			case ProjectPython:
+				setupScript = pythonSetupScript
+				setupLabel = "python"
+			case ProjectGo:
+				setupScript = goSetupScript
+				setupLabel = "go"
+			case ProjectStatic:
+				setupScript = staticSetupScript
+				setupLabel = "static"
+			}
+
+			// Create LXD container with type-specific setup
+			d.broadcastPhase(deployID, "build", fmt.Sprintf("Creating LXD container (%s)...", setupLabel))
+			containerInfo, containerErr := d.lxd.CreateContainerWithUserData(deployCtx, project.ID, project.Name, "images:alpine/3.23", setupScript)
 			if containerErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create LXD container: %s", containerErr.Error()))
 				d.failDeploy(deploy, containerErr.Error())
@@ -973,11 +1009,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			logToDB("stdout", fmt.Sprintf("Container created: %s (ID: %s, IP: %s)", containerInfo.Name, containerInfo.ID, containerInfo.IP))
 
-			// STEP 1: Clone repository directly inside the container FIRST
+			// STEP 1: Clone repository directly inside the container
 			d.broadcastPhase(deployID, "build", "Cloning repository in container...")
 			logToDB("stdout", "Cloning repository inside container...")
 
-			cloneCmd := fmt.Sprintf("apk update && apk add --no-cache git && mkdir -p /app && cd /app && git clone --branch %s --depth 1 %s repo", project.Branch, project.RepoURL)
+			cloneCmd := fmt.Sprintf("mkdir -p /app && cd /app && git clone --branch %s --depth 1 %s repo", project.Branch, project.RepoURL)
 			cloneResult, cloneErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, cloneCmd)
 			if cloneErr != nil || !cloneResult.Success {
 				logToDB("stderr", fmt.Sprintf("Failed to clone repository: %s", cloneErr))
@@ -991,38 +1027,13 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 			logToDB("stdout", "Repository cloned successfully in container")
 
-			// STEP 2: Determine working directory inside container
+			// STEP 3: Determine working directory inside container
 			// Root is at /app/repo, user-specified working dir is appended
 			workDir := "/app/repo"
 			if workingDir != "" && workingDir != "." {
 				workDir = fmt.Sprintf("/app/repo/%s", workingDir)
 			}
 			logToDB("stdout", fmt.Sprintf("Working directory: %s", workDir))
-
-			// STEP 3: Install base dependencies BEFORE framework detection
-			// We need git, node, npm, python, etc. available before we can check files
-			d.broadcastPhase(deployID, "build", "Installing base dependencies...")
-			logToDB("stdout", "Installing base dependencies in container...")
-
-			// First install minimal deps for framework detection
-			logToDB("stdout", "Installing git, curl, bash, and ca-certificates...")
-			minimalDepsCmd := "apk update && apk add --no-cache git curl bash ca-certificates"
-			minimalResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, minimalDepsCmd)
-			if minimalResult != nil && minimalResult.ExitCode != 0 {
-				logToDB("stderr", "Failed to install minimal dependencies")
-				for _, line := range minimalResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-				d.failDeploy(deploy, "Failed to install minimal dependencies")
-				return
-			}
-			// Log all output from minimal deps install
-			if minimalResult != nil {
-				for _, line := range minimalResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
-			logToDB("stdout", "Minimal dependencies installed successfully")
 
 			// STEP 4: Detect framework by checking for specific files inside container
 			d.broadcastPhase(deployID, "detect", "Detecting framework...")
@@ -1037,32 +1048,12 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			)
 			logToDB("stdout", fmt.Sprintf("Detected framework: %s", framework))
 
-			// STEP 5: Install framework-specific dependencies
-			// Now that we know the framework, install only what's needed
-			logToDB("stdout", fmt.Sprintf("Installing dependencies for %s framework...", framework))
+			// All dependencies (nodejs, npm, git, bash, ca-certificates, nginx, supervisor)
+			// are already installed during container creation via setup scripts.
 
-			err = d.lxd.InstallDependencies(deployCtx, containerInfo.ID, framework, false)
-			if err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to install framework dependencies: %v", err))
-				d.failDeploy(deploy, fmt.Sprintf("Failed to install framework dependencies: %v", err))
-				return
-			}
-			logToDB("stdout", "Framework dependencies installed successfully")
+			// Node.js is pre-installed during container creation via setup script
 
-			// STEP 5.5: Install latest Node.js for Node-based frameworks
-			if framework == FrameworkNode || framework == FrameworkNextJS || framework == FrameworkNuxtJS ||
-				framework == FrameworkRemix || framework == FrameworkNestJS || framework == FrameworkExpress ||
-				framework == FrameworkFastify || framework == FrameworkReact || framework == FrameworkVue ||
-				framework == FrameworkAngular || framework == FrameworkSvelte || framework == FrameworkWebpack ||
-				framework == FrameworkVite || framework == FrameworkUnknown {
-				logToDB("stdout", "Installing latest Node.js LTS (v22.13.1)...")
-				if err := d.lxd.InstallLatestNodeJS(deployCtx, containerInfo.ID); err != nil {
-					logToDB("stderr", fmt.Sprintf("Failed to install Node.js: %v", err))
-					d.failDeploy(deploy, fmt.Sprintf("Failed to install Node.js: %v", err))
-					return
-				}
-				logToDB("stdout", "Node.js installed successfully")
-			}
+			// Python and Go are already installed via setup scripts during container creation
 
 			d.logger.Info("detected framework",
 				zap.String("projectId", project.ID),
@@ -1074,12 +1065,16 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			deploy.Framework = string(framework)
 			deploy.IsBackend = IsBackendFramework(framework)
 
-			// Get install and start commands based on detected framework
-			_ = "" // installCmd not used in this flow, commands run inline
-			if project.InstallCommand != nil && *project.InstallCommand != "" {
-				_ = *project.InstallCommand
-			} else {
-				_ = GetDefaultInstallCommand(framework)
+			// Write environment variables to .env file BEFORE dependency installation
+			// so they're available during npm install / pip install
+			if len(envVars) > 0 {
+				logToDB("stdout", "Writing environment variables to .env file...")
+				envContent := ""
+				for k, v := range envVars {
+					envContent += fmt.Sprintf("%s=%s\n", k, v)
+				}
+				writeEnvCmd := fmt.Sprintf("cat > /app/repo/.env << 'EOF'\n%sEOF", envContent)
+				d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeEnvCmd)
 			}
 
 			startCmd = ""
@@ -1122,64 +1117,106 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			logToDB("stdout", fmt.Sprintf("Port proxy configured: %d → %d", hostPort, containerInfo.ContainerPort))
 
 			// STEP 6: Install project dependencies
-			d.broadcastPhase(deployID, "build", "Installing project dependencies...")
-			logToDB("stdout", "Installing project dependencies in container...")
+			// Only run npm install for Node-based frameworks
+			isNodeFramework := framework == FrameworkNode || framework == FrameworkNextJS ||
+				framework == FrameworkNuxtJS || framework == FrameworkRemix || framework == FrameworkNestJS ||
+				framework == FrameworkExpress || framework == FrameworkFastify || framework == FrameworkReact ||
+				framework == FrameworkVue || framework == FrameworkAngular || framework == FrameworkSvelte ||
+				framework == FrameworkWebpack || framework == FrameworkVite || framework == FrameworkUnknown
 
-			// Verify working directory exists
-			lsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("ls -la %s", workDir))
-			if lsResult != nil {
-				logToDB("stdout", "Working directory contents:")
-				for _, line := range lsResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
+			if isNodeFramework {
+				d.broadcastPhase(deployID, "build", "Installing project dependencies...")
+				logToDB("stdout", "Installing project dependencies in container...")
 
-			// Check if package.json exists
-			pkgCheckResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("test -f %s/package.json && echo 'exists' || echo 'not_found'", workDir))
-			if pkgCheckResult != nil {
-				for _, line := range pkgCheckResult.Lines {
-					logToDB("debug", fmt.Sprintf("package.json check: %s", line.Text))
-				}
-			}
-
-			logToDB("stdout", fmt.Sprintf("Running: cd %s && npm install", workDir))
-			// Use simpler npm install command
-			npmInstallCmd := fmt.Sprintf("cd %s && npm install", workDir)
-			installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, npmInstallCmd)
-
-			// Log all npm output
-			if installResult != nil {
-				for _, line := range installResult.Lines {
-					logToDB(line.Stream, line.Text)
-				}
-			}
-
-			// Check for npm errors
-			if installErr != nil || (installResult != nil && installResult.ExitCode != 0) {
-				logToDB("stderr", fmt.Sprintf("npm install failed (exit code: %d)", installResult.ExitCode))
-
-				// Show npm debug log
-				logToDB("stdout", "Fetching npm debug log...")
-				lsLogsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "ls -la /root/.npm/_logs/ 2>&1 || echo 'no logs'")
-				if lsLogsResult != nil {
-					for _, line := range lsLogsResult.Lines {
-						logToDB("debug", line.Text)
+				// Verify working directory exists
+				lsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("ls -la %s", workDir))
+				if lsResult != nil {
+					logToDB("stdout", "Working directory contents:")
+					for _, line := range lsResult.Lines {
+						logToDB(line.Stream, line.Text)
 					}
 				}
 
-				// Try to get the latest npm log
-				debugLogCmd := "cat /root/.npm/_logs/*.log 2>&1 | tail -50"
-				debugResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, debugLogCmd)
-				if debugResult != nil {
-					logToDB("stderr", "--- NPM Debug Log ---")
-					for _, line := range debugResult.Lines {
-						logToDB("stderr", line.Text)
+				// Check if package.json exists
+				pkgCheckResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("test -f %s/package.json && echo 'exists' || echo 'not_found'", workDir))
+				if pkgCheckResult != nil {
+					for _, line := range pkgCheckResult.Lines {
+						logToDB("debug", fmt.Sprintf("package.json check: %s", line.Text))
 					}
 				}
-				d.failDeploy(deploy, "Failed to install project dependencies")
-				return
+
+				installCmd := "npm install --legacy-peer-deps"
+				if project.InstallCommand != nil && *project.InstallCommand != "" {
+					installCmd = *project.InstallCommand
+				}
+				logToDB("stdout", fmt.Sprintf("Running: cd %s && %s", workDir, installCmd))
+				installResult, installErr := d.lxd.RunCommandInContainerWithOptions(deployCtx, containerInfo.ID, installCmd, ExecOptions{
+					WorkDir: workDir,
+					Timeout: 15 * time.Minute,
+				})
+
+				// Log all npm output
+				if installResult != nil {
+					for _, line := range installResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+
+				// Check for npm errors
+				if installErr != nil || (installResult != nil && installResult.ExitCode != 0) {
+					exitCode := -1
+					if installResult != nil {
+						exitCode = installResult.ExitCode
+					}
+					logToDB("stderr", fmt.Sprintf("npm install failed (exit code: %d)", exitCode))
+
+					// Show npm debug log
+					logToDB("stdout", "Fetching npm debug log...")
+					lsLogsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "ls -la /root/.npm/_logs/ 2>&1 || echo 'no logs'")
+					if lsLogsResult != nil {
+						for _, line := range lsLogsResult.Lines {
+							logToDB("debug", line.Text)
+						}
+					}
+
+					// Try to get the latest npm log
+					debugLogCmd := "cat /root/.npm/_logs/*.log 2>&1 | tail -50"
+					debugResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, debugLogCmd)
+					if debugResult != nil {
+						logToDB("stderr", "--- NPM Debug Log ---")
+						for _, line := range debugResult.Lines {
+							logToDB("stderr", line.Text)
+						}
+					}
+					d.failDeploy(deploy, "Failed to install project dependencies")
+					return
+				}
+				logToDB("stdout", "Project dependencies installed successfully")
+			} else if framework == FrameworkFlask || framework == FrameworkDjango || framework == FrameworkFastAPI {
+				d.broadcastPhase(deployID, "build", "Installing project dependencies...")
+				logToDB("stdout", "Installing Python dependencies...")
+				pipInstallCmd := fmt.Sprintf("cd %s && pip install -r requirements.txt 2>/dev/null || true", workDir)
+				pipResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, pipInstallCmd)
+				if pipResult != nil {
+					for _, line := range pipResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+				logToDB("stdout", "Python dependencies installed")
+			} else if framework == FrameworkGo {
+				d.broadcastPhase(deployID, "build", "Installing project dependencies...")
+				logToDB("stdout", "Downloading Go modules...")
+				goModCmd := fmt.Sprintf("cd %s && go mod download", workDir)
+				goModResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, goModCmd)
+				if goModResult != nil {
+					for _, line := range goModResult.Lines {
+						logToDB(line.Stream, line.Text)
+					}
+				}
+				logToDB("stdout", "Go modules downloaded")
+			} else {
+				logToDB("stdout", "No dependency installation needed for this framework")
 			}
-			logToDB("stdout", "Project dependencies installed successfully")
 
 			// STEP 7: Build project
 			// Build is needed for: frontend frameworks (React, Vue, etc.), Next.js, Nuxt.js, or when explicitly specified
@@ -1238,7 +1275,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 					}
 
 					if buildErr != nil || (buildResult != nil && buildResult.ExitCode != 0) {
-						logToDB("stderr", fmt.Sprintf("Failed to build project (exit code: %d)", buildResult.ExitCode))
+						exitCode := -1
+						if buildResult != nil {
+							exitCode = buildResult.ExitCode
+						}
+						logToDB("stderr", fmt.Sprintf("Failed to build project (exit code: %d)", exitCode))
 
 						// Show what's in the directory for debugging
 						lsResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fmt.Sprintf("ls -la %s", workDir))
@@ -1270,10 +1311,10 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// Configure container to auto-start on boot
 			d.broadcastPhase(deployID, "service", "Configuring container auto-start...")
 			logToDB("stdout", "Configuring container to auto-start on system boot...")
-			autostartCmd := fmt.Sprintf("lxc config set %s boot.autostart true", containerInfo.ID)
 			autostarResult, _ := d.runner.Run(deployCtx, exec.RunOpts{
 				JobType: "lxd_autostart",
-				Command: autostartCmd,
+				Command: "lxc",
+				Args:    []string{"config", "set", containerInfo.ID, "boot.autostart", "true"},
 				Timeout: 10 * time.Second,
 			})
 			if autostarResult != nil {
@@ -1286,129 +1327,28 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// STEP 8: Start service or configure nginx
 			if deploy.IsBackend {
 				d.broadcastPhase(deployID, "service", "Starting service...")
-				logToDB("stdout", "Creating OpenRC service file for auto-restart...")
+				logToDB("stdout", "Configuring backend service with supervisor...")
 
-				// Write environment variables to .env file
-				if len(envVars) > 0 {
-					envContent := ""
-					for k, v := range envVars {
-						envContent += fmt.Sprintf("%s=%s\n", k, v)
-					}
-					writeEnvCmd := fmt.Sprintf("cd %s && cat > .env << 'EOF'\n%sEOF", workDir, envContent)
-					_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeEnvCmd)
-				}
-
-				// Create OpenRC service file for the backend
-				serviceName := "opendeploy-app"
-				// Build the full start command: cd to workdir, then run the start command
-				fullStartCommand := fmt.Sprintf("cd %s && %s", workDir, startCmd)
-
-				serviceFile := fmt.Sprintf(`#!/sbin/openrc-run
-
-name="opendeploy-app"
-description="OpenDeploy Application"
-command="sh"
-command_args="-c %s"
-pidfile="/run/opendeploy-app.pid"
-output_log="/var/log/opendeploy-app.log"
-respawn_delay=5
-command_background="yes"
-`, fullStartCommand)
-
-				logToDB("stdout", "Creating OpenRC service file...")
-				logToDB("debug", fmt.Sprintf("Service file content:\n%s", serviceFile))
-
-				// Write the OpenRC service file
-				writeServiceCmd := fmt.Sprintf("cat > /etc/init.d/%s << 'SERVICEEOF'\n%s\nSERVICEEOF", serviceName, serviceFile)
-				writeResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeServiceCmd)
-				if writeResult != nil {
-					for _, line := range writeResult.Lines {
-						logToDB("stdout", line.Text)
-					}
-				}
-
-				// Verify service file was written
-				verifyCmd := fmt.Sprintf("cat /etc/init.d/%s", serviceName)
-				verifyResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, verifyCmd)
-				if verifyResult != nil {
-					logToDB("stdout", "Service file content verification:")
-					for _, line := range verifyResult.Lines {
-						logToDB("stdout", line.Text)
-					}
-				}
-
-				// Make it executable
-				chmodCmd := fmt.Sprintf("chmod +x /etc/init.d/%s", serviceName)
-				chmodResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, chmodCmd)
-				if chmodResult != nil {
-					for _, line := range chmodResult.Lines {
-						logToDB("stdout", line.Text)
-					}
-				}
-
-				// Enable the service
-				logToDB("stdout", "Enabling OpenRC service for auto-start...")
-				enableCmd := fmt.Sprintf("rc-update add %s default", serviceName)
-				enableResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, enableCmd)
-				if enableResult != nil {
-					for _, line := range enableResult.Lines {
+				supervisorConfig := fmt.Sprintf(
+					"printf '[program:app]\\ndirectory=%s\\ncommand=/bin/sh -c \"%s\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/app.log\\nstderr_logfile=/var/log/supervisor/app-err.log\\n' > /etc/supervisor.d/app.ini && "+
+						"supervisorctl reread && supervisorctl update && supervisorctl start app",
+					workDir, startCmd,
+				)
+				svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, supervisorConfig)
+				if svcResult != nil {
+					for _, line := range svcResult.Lines {
 						logToDB(line.Stream, line.Text)
 					}
 				}
-
-				// Check enabled services
-				logToDB("stdout", "Checking enabled services...")
-				listResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-update show default")
-				if listResult != nil {
-					for _, line := range listResult.Lines {
-						logToDB("stdout", line.Text)
-					}
-				}
-
-				// Start the service
-				logToDB("stdout", fmt.Sprintf("Starting backend service: %s", fullStartCommand))
-				startSVC := fmt.Sprintf("rc-service %s start", serviceName)
-				startResult, startErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, startSVC)
-				if startResult != nil {
-					for _, line := range startResult.Lines {
-						logToDB(line.Stream, line.Text)
-					}
-				}
-				if startErr != nil || (startResult != nil && startResult.ExitCode != 0) {
-					// Check service status
-					statusCmd := fmt.Sprintf("rc-service %s status", serviceName)
-					statusResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, statusCmd)
-					if statusResult != nil {
-						for _, line := range statusResult.Lines {
-							logToDB("stdout", line.Text)
-						}
-					}
-					// Show service log
-					logResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "cat /var/log/opendeploy-app.log 2>&1 || echo 'no logs yet'")
-					if logResult != nil {
-						for _, line := range logResult.Lines {
-							logToDB("stdout", line.Text)
-						}
-					}
-					logToDB("stderr", fmt.Sprintf("Failed to start service (exit code: %d)", startResult.ExitCode))
+				if svcErr != nil || (svcResult != nil && svcResult.ExitCode != 0) {
+					logToDB("stderr", "Failed to start backend via supervisor")
 					d.failDeploy(deploy, "Failed to start service")
 					return
 				}
-				logToDB("stdout", "Service started successfully with auto-restart enabled")
+				logToDB("stdout", "Backend service started (managed by supervisor)")
 			} else {
-				// For frontend, configure nginx (already installed)
+				// For frontend, configure nginx via supervisor
 				d.broadcastPhase(deployID, "service", "Configuring nginx...")
-				logToDB("stdout", "Installing nginx in container...")
-
-				// Ensure nginx is installed
-				nginxInstallCmd := "apk add --no-cache nginx"
-				nginxInstResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, nginxInstallCmd)
-				if nginxInstResult != nil {
-					for _, line := range nginxInstResult.Lines {
-						logToDB(line.Stream, line.Text)
-					}
-				}
-
 				logToDB("stdout", "Configuring nginx in container...")
 
 				// Determine output directory
@@ -1426,17 +1366,17 @@ command_background="yes"
 					}
 				}
 
-				// Setup OpenRC for nginx auto-start
-				logToDB("stdout", "Configuring nginx auto-start with OpenRC...")
-				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-update add nginx default")
-				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-service nginx stop") // Stop first
-
-				// Create nginx config
-				nginxSetupCmd := fmt.Sprintf(`
-					mkdir -p /run/nginx && \
-					echo 'server { listen 80; root %s/%s; index index.html; location / { try_files $uri $uri/ /index.html; } }' > /etc/nginx/http.d/default.conf && \
-					nginx -t
-				`, workDir, outputDir)
+				// Create nginx config and supervisor entry
+				nginxSetupCmd := fmt.Sprintf(
+					"mkdir -p /run/nginx /var/log/supervisor && "+
+						"rm -f /etc/nginx/http.d/default.conf && "+
+						"printf 'server {\\n  listen 80;\\n  root %s/%s;\\n  index index.html;\\n  location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
+						"nginx -t && "+
+						"printf '[program:nginx]\\ncommand=/usr/sbin/nginx -g \"daemon off;\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/nginx.log\\nstderr_logfile=/var/log/supervisor/nginx-err.log\\n' > /etc/supervisor.d/nginx.ini && "+
+						"rm -f /etc/supervisor.d/app.ini && "+
+						"supervisorctl reread && supervisorctl update && supervisorctl start nginx",
+					workDir, outputDir,
+				)
 
 				nginxResult, nginxErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, nginxSetupCmd)
 				if nginxResult != nil {
@@ -1445,22 +1385,18 @@ command_background="yes"
 					}
 				}
 				if nginxErr != nil || (nginxResult != nil && nginxResult.ExitCode != 0) {
-					logToDB("stderr", fmt.Sprintf("Failed to setup nginx: %s", nginxErr))
+					logToDB("stderr", "Failed to setup nginx via supervisor")
 					d.failDeploy(deploy, "Failed to setup nginx")
 					return
 				}
-
-				// Start nginx with OpenRC
-				logToDB("stdout", "Starting nginx with OpenRC...")
-				_, _ = d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "rc-service nginx start")
-				logToDB("stdout", "Nginx configured and started with auto-restart enabled")
+				logToDB("stdout", "Nginx configured and started (managed by supervisor)")
 			}
 
 			// Save container info to database
 			container := &state.Container{
 				ProjectID:    project.ID,
 				Name:         containerInfo.Name,
-				Image:        "images:alpine/3.20",
+				Image:        "images:alpine/3.23",
 				ContainerID:  containerInfo.ID,
 				Status:       "running",
 				PortMappings: fmt.Sprintf(`{"host":"%d","container":"%d"}`, hostPort, containerPort),
@@ -1762,17 +1698,20 @@ func (d *DeployService) failDeploy(deploy *state.Deploy, errMsg string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Get containers for this project
-		containers, _ := d.db.ListContainersByProject(deploy.ProjectID)
-		for _, container := range containers {
-			d.logger.Info("cleaning up container on deploy failure",
-				zap.String("projectId", deploy.ProjectID),
-				zap.String("containerName", container.Name),
-			)
-			// Stop and delete the container
-			d.lxd.StopContainer(ctx, container.ContainerID)
-			d.lxd.DeleteContainer(ctx, container.ContainerID)
-			d.db.DeleteContainer(container.ID)
+		// Get containers for this project, including full-stack variants
+		allProjectIDs := []string{deploy.ProjectID, deploy.ProjectID + "-frontend", deploy.ProjectID + "-backend"}
+		for _, pid := range allProjectIDs {
+			containers, _ := d.db.ListContainersByProject(pid)
+			for _, container := range containers {
+				d.logger.Info("cleaning up container on deploy failure",
+					zap.String("projectId", deploy.ProjectID),
+					zap.String("containerName", container.Name),
+				)
+				// Stop and delete the container
+				d.lxd.StopContainer(ctx, container.ContainerID)
+				d.lxd.DeleteContainer(ctx, container.ContainerID)
+				d.db.DeleteContainer(container.ID)
+			}
 		}
 	}
 

@@ -322,42 +322,97 @@ func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) er
 		return fmt.Errorf("project not found: %w", err)
 	}
 
-	// 1. Stop and remove containers (but keep images for reuse)
-	containers, _ := c.db.ListContainersByProject(projectID)
-	for _, container := range containers {
-		c.logger.Info("stopping and removing container",
-			zap.String("projectId", projectID),
-			zap.String("containerId", container.ContainerID),
-		)
+	// 1. Find ALL containers for this project, including full-stack variants
+	// Full-stack deployments store containers with projectID+"-frontend" and projectID+"-backend"
+	allContainerIDs := []string{projectID}
+	allContainerIDs = append(allContainerIDs, projectID+"-frontend")
+	allContainerIDs = append(allContainerIDs, projectID+"-backend")
 
-		// Stop container with force flag
-		c.runner.Run(ctx, exec.RunOpts{
-			JobType: "lxd_stop",
-			Command: "lxc",
-			Args:    []string{"stop", container.ContainerID, "--force"},
-			Timeout: 30 * time.Second,
-		})
-
-		// Remove container from LXD with force flag
-		c.runner.Run(ctx, exec.RunOpts{
-			JobType: "lxd_delete",
-			Command: "lxc",
-			Args:    []string{"delete", "--force", container.ContainerID},
-			Timeout: 30 * time.Second,
-		})
-
-		// Remove from database
-		c.db.DeleteContainer(container.ID)
+	var allContainers []state.Container
+	for _, cid := range allContainerIDs {
+		containers, err := c.db.ListContainersByProject(cid)
+		if err == nil && len(containers) > 0 {
+			allContainers = append(allContainers, containers...)
+		}
 	}
 
-	// 2. Delete cloned repository from /tmp
+	c.logger.Info("found containers for project",
+		zap.String("projectId", projectID),
+		zap.Int("count", len(allContainers)),
+	)
+
+	// 2. Stop and remove each container
+	for _, container := range allContainers {
+		lxdName := container.ContainerID
+		c.logger.Info("stopping and removing container",
+			zap.String("projectId", projectID),
+			zap.String("containerName", container.Name),
+			zap.String("lxdName", lxdName),
+		)
+
+		// Remove proxy devices before stopping (in case they cause issues)
+		c.removeAllProxyDevices(ctx, lxdName)
+
+		// Stop container with force flag
+		stopResult, stopErr := c.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_stop",
+			Command: "lxc",
+			Args:    []string{"stop", lxdName, "--force"},
+			Timeout: 30 * time.Second,
+		})
+		if stopErr != nil || (stopResult != nil && !stopResult.Success) {
+			c.logger.Warn("failed to stop container, attempting delete anyway",
+				zap.String("lxdName", lxdName),
+				zap.Error(stopErr),
+			)
+		}
+
+		// Remove container from LXD with force flag
+		delResult, delErr := c.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_delete",
+			Command: "lxc",
+			Args:    []string{"delete", "--force", lxdName},
+			Timeout: 30 * time.Second,
+		})
+		if delErr != nil || (delResult != nil && !delResult.Success) {
+			c.logger.Error("failed to delete LXD container",
+				zap.String("lxdName", lxdName),
+				zap.Error(delErr),
+			)
+			// Log output for debugging
+			if delResult != nil {
+				for _, line := range delResult.Lines {
+					c.logger.Error("lxc delete output",
+						zap.String("stream", line.Stream),
+						zap.String("text", line.Text),
+					)
+				}
+			}
+		} else {
+			c.logger.Info("LXD container deleted", zap.String("lxdName", lxdName))
+		}
+
+		// Remove from database
+		if err := c.db.DeleteContainer(container.ID); err != nil {
+			c.logger.Error("failed to delete container from DB",
+				zap.String("containerId", container.ID),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// 3. Fallback: find any orphan LXD containers matching this project by name pattern
+	// This catches containers that may exist in LXD but not in the database
+	c.cleanupOrphanContainersByName(ctx, project.Name, projectID)
+
+	// 4. Delete cloned repository from /tmp
 	repoPath := filepath.Join("/tmp", projectID)
 	if _, err := os.Stat(repoPath); err == nil {
 		c.logger.Info("removing cloned repository", zap.String("path", repoPath))
 		os.RemoveAll(repoPath)
 	}
 
-	// 3. Delete build artifacts from output directory
+	// 5. Delete build artifacts from output directory
 	if project.Name != "" {
 		outputPath := filepath.Join(c.cfg.OutputRoot, "sites", sanitizeFolderName(project.Name))
 		if _, err := os.Stat(outputPath); err == nil {
@@ -366,7 +421,7 @@ func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) er
 		}
 	}
 
-	// 4. Remove nginx site config if domain is set
+	// 6. Remove nginx site config if domain is set
 	if project.Domain != "" {
 		c.logger.Info("removing nginx site config", zap.String("domain", project.Domain))
 
@@ -395,24 +450,118 @@ func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) er
 		}
 	}
 
-	// 5. Delete all deploys and their logs
+	// 7. Delete all deploys and their logs
 	deploys, _ := c.db.ListDeploysByProject(projectID)
 	for _, deploy := range deploys {
 		c.db.DeleteDeployLogs(deploy.ID)
 	}
-	// Deploys will be cascade deleted when project is deleted due to foreign key
 
-	// 6. Delete environment variables
+	// 8. Delete environment variables
 	envVars, _ := c.db.ListEnvVariables(projectID)
 	for _, env := range envVars {
 		c.db.DeleteEnvVariable(env.ID)
 	}
 
-	// 7. Delete project from database (this will cascade delete deploys)
+	// 9. Delete project from database (this will cascade delete deploys)
 	if err := c.db.DeleteProject(projectID); err != nil {
 		return fmt.Errorf("failed to delete project from database: %w", err)
 	}
 
 	c.logger.Info("project deleted successfully", zap.String("projectId", projectID))
 	return nil
+}
+
+// removeAllProxyDevices removes all proxy devices from an LXD container
+func (c *CleanupService) removeAllProxyDevices(ctx context.Context, containerName string) {
+	// List all devices on the container
+	result, err := c.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_list_devices",
+		Command: "lxc",
+		Args:    []string{"config", "device", "list", containerName},
+		Timeout: 10 * time.Second,
+	})
+
+	if err != nil || result == nil || !result.Success {
+		return
+	}
+
+	// Parse device names and remove proxy devices
+	for _, line := range result.Lines {
+		if line.Stream == "stdout" {
+			deviceName := strings.TrimSpace(line.Text)
+			if strings.HasPrefix(deviceName, "proxy") {
+				c.logger.Info("removing proxy device",
+					zap.String("container", containerName),
+					zap.String("device", deviceName),
+				)
+				c.runner.Run(ctx, exec.RunOpts{
+					JobType: "lxd_remove_device",
+					Command: "lxc",
+					Args:    []string{"config", "device", "remove", containerName, deviceName},
+					Timeout: 10 * time.Second,
+				})
+			}
+		}
+	}
+}
+
+// cleanupOrphanContainersByName finds and removes LXD containers matching a project name pattern
+// that may not be tracked in the database
+func (c *CleanupService) cleanupOrphanContainersByName(ctx context.Context, projectName, projectID string) {
+	if projectName == "" {
+		return
+	}
+
+	// List all LXD containers matching the opendeploy-<projectName> pattern
+	// Container names are like: opendeploy-<projectName>-<timestamp>
+	// For full-stack: opendeploy-<projectName>-frontend-<timestamp>, opendeploy-<projectName>-backend-<timestamp>
+	result, err := c.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_list",
+		Command: "lxc",
+		Args:    []string{"list", "--format", "csv", "--columns", "n"},
+		Timeout: 10 * time.Second,
+	})
+
+	if err != nil || result == nil || !result.Success {
+		return
+	}
+
+	prefix := fmt.Sprintf("opendeploy-%s", projectName)
+	for _, line := range result.Lines {
+		if line.Stream == "stdout" {
+			name := strings.TrimSpace(line.Text)
+			if name == "" {
+				continue
+			}
+
+			// Check if this container matches our project
+			if strings.HasPrefix(name, prefix) {
+				// Check if it's already tracked in our DB
+				dbContainer, _ := c.db.GetContainerByName(name)
+				if dbContainer == nil {
+					c.logger.Info("found orphan LXD container, removing",
+						zap.String("containerName", name),
+						zap.String("projectId", projectID),
+					)
+
+					// Remove proxy devices
+					c.removeAllProxyDevices(ctx, name)
+
+					// Stop and delete
+					c.runner.Run(ctx, exec.RunOpts{
+						JobType: "lxd_stop",
+						Command: "lxc",
+						Args:    []string{"stop", name, "--force"},
+						Timeout: 30 * time.Second,
+					})
+					c.runner.Run(ctx, exec.RunOpts{
+						JobType: "lxd_delete",
+						Command: "lxc",
+						Args:    []string{"delete", "--force", name},
+						Timeout: 30 * time.Second,
+					})
+				}
+			}
+		}
+	}
 }
