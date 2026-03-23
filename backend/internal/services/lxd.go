@@ -333,6 +333,22 @@ func (l *LXDService) CreateContainerWithUserData(ctx context.Context, projectID,
 	// Wait for container to be ready and get network
 	time.Sleep(5 * time.Second)
 
+	// Ensure shared cache directory exists on the host
+	os.MkdirAll("/opt/shared/npm-cache", 0755)
+
+	// Bind-mount shared npm cache directory into the container for faster subsequent installs
+	l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_add_disk_device",
+		Command: "lxc",
+		Args: []string{
+			"config", "device", "add", containerID,
+			"shared-npm-cache", "disk",
+			"source=/opt/shared/npm-cache",
+			"path=/root/.npm",
+		},
+		Timeout: 15 * time.Second,
+	})
+
 	// Execute user-data setup script if provided
 	// (Alpine doesn't have cloud-init, so we run it directly)
 	if userData != "" {
@@ -882,10 +898,16 @@ func (l *LXDService) RunCommandInContainer(ctx context.Context, containerID, com
 		zap.String("command", command),
 	)
 
+	command = wrapWithNodePath(command)
+
+	args := []string{"exec", containerID}
+	args = append(args, getNodeEnvFlags()...)
+	args = append(args, "--", "/bin/sh", "-c", command)
+
 	result, err := l.runner.Run(ctx, exec.RunOpts{
 		JobType: "lxd_exec",
 		Command: "lxc",
-		Args:    []string{"exec", containerID, "--", "/bin/sh", "-c", command},
+		Args:    args,
 		Timeout: 5 * time.Minute,
 	})
 

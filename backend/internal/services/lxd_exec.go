@@ -10,6 +10,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// getNodeEnvFlags returns lxc exec --env flags that set PATH for Node.js.
+func getNodeEnvFlags() []string {
+	return []string{
+		"--env", "PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"--env", "HOME=/root",
+	}
+}
+
+// wrapWithNodePath ensures node/npm commands use the correct path
+func wrapWithNodePath(fullCmd string) string {
+	// Node.js is now installed directly in /usr/local/bin, so PATH is already correct
+	return fullCmd
+}
+
 // ExecOptions holds options for executing commands in containers
 type ExecOptions struct {
 	WorkDir     string
@@ -45,10 +59,16 @@ func (l *LXDService) RunCommandInContainerWithOptions(ctx context.Context, conta
 		timeout = 5 * time.Minute
 	}
 
+	fullCmd = wrapWithNodePath(fullCmd)
+
+	args := []string{"exec", containerID}
+	args = append(args, getNodeEnvFlags()...)
+	args = append(args, "--", "/bin/sh", "-c", fullCmd)
+
 	result, err := l.runner.Run(ctx, exec.RunOpts{
 		JobType: "lxd_exec",
 		Command: "lxc",
-		Args:    []string{"exec", containerID, "--", "/bin/sh", "-c", fullCmd},
+		Args:    args,
 		Timeout: timeout,
 	})
 

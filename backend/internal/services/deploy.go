@@ -40,12 +40,9 @@ const frontendSetupScript = `set -e` + networkWait + `
 echo "SETUP: network ready"
 apk update
 echo "SETUP: apk update done"
-apk add --no-cache nodejs
-echo "SETUP: nodejs installed"
-apk add --no-cache npm
-echo "SETUP: npm installed"
-apk add --no-cache git bash ca-certificates nginx supervisor
+apk add --no-cache git bash curl ca-certificates libstdc++ libc6-compat python3 make g++ supervisor socat tar xz nodejs npm nginx
 echo "SETUP: all packages installed"
+echo "SETUP: Node.js $(node --version) and npm $(npm --version) installed"
 mkdir -p /var/log/supervisor /etc/supervisor.d
 supervisord -c /etc/supervisord.conf
 echo "SETUP: supervisord started"
@@ -59,12 +56,9 @@ const nodejsSetupScript = `set -e` + networkWait + `
 echo "SETUP: network ready"
 apk update
 echo "SETUP: apk update done"
-apk add --no-cache nodejs
-echo "SETUP: nodejs installed"
-apk add --no-cache npm
-echo "SETUP: npm installed"
-apk add --no-cache git bash ca-certificates nginx supervisor
+apk add --no-cache git bash curl ca-certificates libstdc++ libc6-compat python3 make g++ supervisor socat nodejs npm
 echo "SETUP: all packages installed"
+echo "SETUP: Node.js $(node --version) and npm $(npm --version) installed"
 mkdir -p /var/log/supervisor /etc/supervisor.d
 supervisord -c /etc/supervisord.conf
 echo "SETUP: supervisord started"
