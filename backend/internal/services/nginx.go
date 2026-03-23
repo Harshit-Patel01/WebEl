@@ -21,6 +21,7 @@ import (
 type NginxSiteConfig struct {
 	Domain               string `json:"domain"`
 	FrontendPath         string `json:"frontend_path"`
+	ListenPort           int    `json:"listen_port"`
 	ProxyEnabled         bool   `json:"proxy_enabled"`
 	ProxyPort            int    `json:"proxy_port"`
 	ProxyTarget          string `json:"proxy_target"`
@@ -58,6 +59,7 @@ func (n *NginxService) GenerateConfig(siteCfg NginxSiteConfig) string {
 	return templates.RenderNginxConfig(templates.NginxTemplateData{
 		Domain:               siteCfg.Domain,
 		FrontendPath:         siteCfg.FrontendPath,
+		ListenPort:           siteCfg.ListenPort,
 		ProxyEnabled:         siteCfg.ProxyEnabled,
 		ProxyPort:            siteCfg.ProxyPort,
 		ProxyTarget:          siteCfg.ProxyTarget,
@@ -70,6 +72,7 @@ func (n *NginxService) GenerateFrontendConfig(siteCfg NginxSiteConfig) string {
 	return templates.RenderFrontendConfig(templates.NginxTemplateData{
 		Domain:               siteCfg.Domain,
 		FrontendPath:         siteCfg.FrontendPath,
+		ListenPort:           siteCfg.ListenPort,
 		ProxyEnabled:         siteCfg.ProxyEnabled,
 		ProxyPort:            siteCfg.ProxyPort,
 		ProxyTarget:          siteCfg.ProxyTarget,
@@ -82,6 +85,7 @@ func (n *NginxService) GenerateBackendConfig(siteCfg NginxSiteConfig) string {
 	return templates.RenderBackendConfig(templates.NginxTemplateData{
 		Domain:               siteCfg.Domain,
 		FrontendPath:         siteCfg.FrontendPath,
+		ListenPort:           siteCfg.ListenPort,
 		ProxyEnabled:         siteCfg.ProxyEnabled,
 		ProxyPort:            siteCfg.ProxyPort,
 		ProxyTarget:          siteCfg.ProxyTarget,
