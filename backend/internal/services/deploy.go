@@ -23,7 +23,7 @@ const (
 	ProjectNode   ProjectType = "node"
 	ProjectPython ProjectType = "python"
 	ProjectGo     ProjectType = "go"
-	ProjectStatic ProjectType = "static"
+	ProjectStatic ProjectType = "static"n
 )
 
 // networkWait waits for container network/DNS to be ready before installing packages.
@@ -37,24 +37,40 @@ done
 // frontendSetupScript sets up a container for frontend projects (React, Vue, Angular, etc).
 // Includes nginx and supervisor for process management.
 const frontendSetupScript = `set -e` + networkWait + `
-apk update && apk add --no-cache nodejs npm git bash ca-certificates nginx supervisor
+echo "SETUP: network ready"
+apk update
+echo "SETUP: apk update done"
+apk add --no-cache nodejs
+echo "SETUP: nodejs installed"
+apk add --no-cache npm
+echo "SETUP: npm installed"
+apk add --no-cache git bash ca-certificates nginx supervisor
+echo "SETUP: all packages installed"
 mkdir -p /var/log/supervisor /etc/supervisor.d
 supervisord -c /etc/supervisord.conf
-which node || apk add --no-cache nodejs
-which npm || apk add --no-cache npm
+echo "SETUP: supervisord started"
 node --version
 npm --version
+echo "SETUP: complete"
 `
 
 // nodejsSetupScript sets up a container for Node.js projects (backend and frontend).
 const nodejsSetupScript = `set -e` + networkWait + `
-apk update && apk add --no-cache nodejs npm git bash ca-certificates nginx supervisor
+echo "SETUP: network ready"
+apk update
+echo "SETUP: apk update done"
+apk add --no-cache nodejs
+echo "SETUP: nodejs installed"
+apk add --no-cache npm
+echo "SETUP: npm installed"
+apk add --no-cache git bash ca-certificates nginx supervisor
+echo "SETUP: all packages installed"
 mkdir -p /var/log/supervisor /etc/supervisor.d
 supervisord -c /etc/supervisord.conf
-which node || apk add --no-cache nodejs
-which npm || apk add --no-cache npm
+echo "SETUP: supervisord started"
 node --version
 npm --version
+echo "SETUP: complete"
 `
 
 // pythonSetupScript sets up a container for Python projects (Flask, Django, FastAPI).
@@ -1435,7 +1451,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				}
 
 				if domainToUse != "" {
-					if err := d.applyNginxForDeploy(deployCtx, project, domainToUse, "", isBackend, 0, backendProxyPort); err != nil {
+					nginxPort, err := d.applyNginxForDeploy(deployCtx, project, domainToUse, "", isBackend, 0, backendProxyPort)
+					if err != nil {
 						logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
 						d.logger.Error("nginx apply failed", zap.String("deployId", deployID), zap.String("domain", domainToUse), zap.Error(err))
 					} else {
@@ -1445,7 +1462,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 						} else if !isBackend && frontendProxyPort > 0 {
 							configType = "frontend"
 						}
-						logToDB("stdout", fmt.Sprintf("Nginx %s config configured for %s", configType, domainToUse))
+						logToDB("stdout", fmt.Sprintf("Nginx %s config configured for %s (listen port: %d)", configType, domainToUse, nginxPort))
 					}
 				}
 			}
