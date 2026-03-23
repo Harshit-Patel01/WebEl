@@ -36,7 +36,7 @@ var frameworkRules = []struct {
 func DetectFramework(workDir string) (*FrameworkInfo, error) {
 	data, err := os.ReadFile(filepath.Join(workDir, "package.json"))
 	if err != nil {
-		return nil, err // not a Node project
+		return nil, err
 	}
 
 	var pkg struct {
@@ -62,7 +62,7 @@ func DetectFramework(workDir string) (*FrameworkInfo, error) {
 		}
 	}
 
-	return nil, nil // unknown Node project
+	return nil, nil
 }
 
 // DetectLanguage acts as a fallback for non-Node projects

@@ -1767,7 +1767,6 @@ WantedBy=multi-user.target
 	serviceName := fmt.Sprintf("opendeploy-app-%s", name)
 	servicePath := fmt.Sprintf("/etc/systemd/system/%s.service", serviceName)
 	if err := os.WriteFile(servicePath, []byte(unit), 0644); err != nil {
-		// Try with sudo via temp file
 		tmpPath := fmt.Sprintf("/tmp/%s.service", serviceName)
 		if writeErr := os.WriteFile(tmpPath, []byte(unit), 0644); writeErr != nil {
 			return fmt.Errorf("writing service file: %w", err)
