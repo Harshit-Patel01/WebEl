@@ -1185,34 +1185,6 @@ func (l *LXDService) DetectFramework(projectDir string) FrameworkType {
 	return FrameworkUnknown
 }
 
-// hostBinaryInfo describes a binary on the host to bind mount into the container
-type hostBinaryInfo struct {
-	binary       string // e.g. "node"
-	hostPath     string // full path on host, e.g. "/usr/local/bin/node"
-	containerDir string // target dir in container, e.g. "/usr/local/bin"
-}
-
-// findHostBinary checks if a binary exists on the host at any of the given paths
-func (l *LXDService) findHostBinary(ctx context.Context, candidates []string) (string, error) {
-	for _, path := range candidates {
-		checkCmd := fmt.Sprintf("test -f %s && echo 'found'", path)
-		result, err := l.runner.Run(ctx, exec.RunOpts{
-			JobType: "check_host_binary",
-			Command: "/bin/sh",
-			Args:    []string{"-c", checkCmd},
-			Timeout: 5 * time.Second,
-		})
-		if err == nil && result.Success {
-			for _, line := range result.Lines {
-				if strings.Contains(line.Text, "found") {
-					return path, nil
-				}
-			}
-		}
-	}
-	return "", fmt.Errorf("binary not found on host")
-}
-
 // BindMountHostDir mounts a host directory into the container as an LXD disk device
 // and creates symlinks for individual binaries. Uses live bind mount (no file copying).
 func (l *LXDService) BindMountHostDir(ctx context.Context, containerID, sourceDir, mountPoint string, symlinkTargets []string) error {

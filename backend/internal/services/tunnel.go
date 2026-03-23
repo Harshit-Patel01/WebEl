@@ -2,8 +2,6 @@ package services
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -176,7 +174,7 @@ func (t *TunnelService) SetupTunnel(ctx context.Context, req TunnelSetupRequest)
 
 	// Step 6: Write cloudflared config from database
 	t.logger.Info("writing cloudflared config")
-	if err := t.writeConfig(tunnelResp.ID, fullDomain); err != nil {
+	if err := t.writeConfig(tunnelResp.ID); err != nil {
 		return nil, fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -327,7 +325,7 @@ func (t *TunnelService) RestartTunnel(ctx context.Context) error {
 		}
 
 		// Recreate the config file
-		if err := t.writeConfig(config.TunnelID, config.Domain); err != nil {
+		if err := t.writeConfig(config.TunnelID); err != nil {
 			return fmt.Errorf("failed to recreate config: %w", err)
 		}
 
@@ -467,7 +465,7 @@ func (t *TunnelService) DeleteTunnel(ctx context.Context, apiKey string) error {
 }
 
 // writeConfig writes the cloudflared config.yml from database routes
-func (t *TunnelService) writeConfig(tunnelID, domain string) error {
+func (t *TunnelService) writeConfig(tunnelID string) error {
 	// Get routes from database
 	routes, err := t.db.ListTunnelRoutes(tunnelID)
 	if err != nil {
@@ -538,7 +536,7 @@ func (t *TunnelService) regenerateConfig(ctx context.Context, tunnelID string) e
 	}
 
 	// Regenerate config from database
-	if err := t.writeConfig(tunnelID, config.Domain); err != nil {
+	if err := t.writeConfig(tunnelID); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -757,9 +755,9 @@ func (t *TunnelService) DetectConfigDrift(ctx context.Context, apiKey string) (*
 
 	// Compare configurations
 	result := &ConfigDriftResult{
-		HasDrift:      false,
-		LocalRoutes:   len(localRoutes),
-		CloudflareRoutes: len(cfConfig.Config.Ingress) - 1, // Subtract catch-all rule
+		HasDrift:            false,
+		LocalRoutes:         len(localRoutes),
+		CloudflareRoutes:    len(cfConfig.Config.Ingress) - 1, // Subtract catch-all rule
 		MissingInCloudflare: []string{},
 		ExtraInCloudflare:   []string{},
 	}
@@ -916,13 +914,13 @@ func (t *TunnelService) GetZonesFromStoredToken(ctx context.Context, apiKey stri
 }
 
 type TunnelWithDomains struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Status      string   `json:"status"`
-	CreatedAt   string   `json:"created_at"`
-	Domains     []string `json:"domains"`
-	AccountID   string   `json:"account_id"`
-	IsManaged   bool     `json:"is_managed"` // true if this is the tunnel managed by OpenDeploy
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Status    string   `json:"status"`
+	CreatedAt string   `json:"created_at"`
+	Domains   []string `json:"domains"`
+	AccountID string   `json:"account_id"`
+	IsManaged bool     `json:"is_managed"` // true if this is the tunnel managed by OpenDeploy
 }
 
 func (t *TunnelService) ListAllTunnels(ctx context.Context, apiKey string) ([]TunnelWithDomains, error) {
@@ -1119,7 +1117,7 @@ func (t *TunnelService) AdoptTunnelWithToken(ctx context.Context, tunnelID, tunn
 	}
 
 	// Write cloudflared config from routes - domain will be set from first route in writeConfig
-	if err := t.writeConfig(tunnelID, ""); err != nil {
+	if err := t.writeConfig(tunnelID); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -1266,10 +1264,4 @@ func (t *TunnelService) verifyService(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// hashToken creates a SHA256 hash of the API token for storage
-func hashToken(token string) string {
-	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:])
 }
