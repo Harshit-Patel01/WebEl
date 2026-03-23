@@ -9,6 +9,7 @@ import (
 type NginxTemplateData struct {
 	Domain               string
 	FrontendPath         string
+	ListenPort           int
 	ProxyEnabled         bool
 	ProxyPort            int
 	ProxyTarget          string
@@ -18,7 +19,7 @@ type NginxTemplateData struct {
 
 // nginxTemplate is the original template that handles both frontend and backend
 const nginxTemplate = `server {
-    listen 80;
+    listen {{if .ListenPort}}{{.ListenPort}}{{else}}80{{end}};
     server_name {{.Domain}};
 
     # Gzip compression
@@ -111,7 +112,7 @@ const nginxTemplate = `server {
 
 // frontendTemplate serves only the frontend (static files or proxy)
 const frontendTemplate = `server {
-    listen 80;
+    listen {{if .ListenPort}}{{.ListenPort}}{{else}}80{{end}};
     server_name {{.Domain}};
 
     # Gzip compression
@@ -164,7 +165,7 @@ const frontendTemplate = `server {
 
 // backendTemplate serves only the backend API routes
 const backendTemplate = `server {
-    listen 80;
+    listen {{if .ListenPort}}{{.ListenPort}}{{else}}80{{end}};
     server_name {{.Domain}};
 
     # Gzip compression
