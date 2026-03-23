@@ -28,8 +28,21 @@ const (
 
 // networkWait waits for container network/DNS to be ready before installing packages.
 const networkWait = `
-for i in $(seq 1 30); do
+# Configure DNS resolvers directly
+cat > /etc/resolv.conf << 'EOF'
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 208.67.222.222
+options timeout:1 attempts:2
+EOF
+
+# Wait for network connectivity
+for i in $(seq 1 15); do
   ping -c1 -W1 dl-cdn.alpinelinux.org >/dev/null 2>&1 && break
+  sleep 1
+done
+for i in $(seq 1 15); do
+  ping -c1 -W1 registry.npmjs.org >/dev/null 2>&1 && break
   sleep 1
 done
 `
@@ -38,57 +51,69 @@ done
 // Includes nginx and supervisor for process management.
 const frontendSetupScript = `set -e` + networkWait + `
 echo "SETUP: network ready"
-apk update
+# Install base packages including Node.js
+apk update --no-cache
 echo "SETUP: apk update done"
-apk add --no-cache git bash curl ca-certificates libstdc++ libc6-compat python3 make g++ supervisor socat tar xz nodejs npm nginx
-echo "SETUP: all packages installed"
+apk add --no-cache git bash ca-certificates supervisor nginx iproute2 nodejs npm
+
+# Create nginx directories
+mkdir -p /etc/nginx/http.d /run/nginx
+
 echo "SETUP: Node.js $(node --version) and npm $(npm --version) installed"
-mkdir -p /var/log/supervisor /etc/supervisor.d
-supervisord -c /etc/supervisord.conf
+
+# Configure npm
+npm config set registry https://registry.npmjs.org/
+npm config set fetch-retries 5
+npm config set fetch-retry-mintimeout 20000
+npm config set fetch-retry-maxtimeout 120000
+
+mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
 echo "SETUP: supervisord started"
-node --version
-npm --version
-echo "SETUP: complete"
+node --version && npm --version && echo "SETUP: complete"
 `
 
 // nodejsSetupScript sets up a container for Node.js projects (backend and frontend).
 const nodejsSetupScript = `set -e` + networkWait + `
 echo "SETUP: network ready"
-apk update
+# Install base packages including Node.js
+apk update --no-cache
 echo "SETUP: apk update done"
-apk add --no-cache git bash curl ca-certificates libstdc++ libc6-compat python3 make g++ supervisor socat nodejs npm
-echo "SETUP: all packages installed"
+apk add --no-cache git bash ca-certificates supervisor iproute2 nodejs npm
+
 echo "SETUP: Node.js $(node --version) and npm $(npm --version) installed"
-mkdir -p /var/log/supervisor /etc/supervisor.d
-supervisord -c /etc/supervisord.conf
+
+# Configure npm
+npm config set registry https://registry.npmjs.org/
+npm config set fetch-retries 5
+npm config set fetch-retry-mintimeout 20000
+npm config set fetch-retry-maxtimeout 120000
+
+mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
 echo "SETUP: supervisord started"
-node --version
-npm --version
-echo "SETUP: complete"
+node --version && npm --version && echo "SETUP: complete"
 `
 
 // pythonSetupScript sets up a container for Python projects (Flask, Django, FastAPI).
 const pythonSetupScript = `set -e` + networkWait + `
-apk update && apk add --no-cache python3 py3-pip git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
-supervisord -c /etc/supervisord.conf
+# Install Python packages
+apk update --no-cache && apk add --no-cache python3 py3-pip git bash ca-certificates supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
 python3 --version
 `
 
 // goSetupScript sets up a container for Go projects.
 const goSetupScript = `set -e` + networkWait + `
-apk update && apk add --no-cache go git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
-supervisord -c /etc/supervisord.conf
+# Install Go packages
+apk update --no-cache && apk add --no-cache go git bash ca-certificates supervisor
+mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
 go version
 `
 
 // staticSetupScript sets up a container for static HTML/CSS/JS sites.
 const staticSetupScript = `set -e` + networkWait + `
-apk update && apk add --no-cache git bash ca-certificates nginx supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
-supervisord -c /etc/supervisord.conf
-nginx -v
+# Install static packages
+apk update --no-cache && apk add --no-cache git bash ca-certificates nginx supervisor
+mkdir -p /etc/nginx/http.d /run/nginx /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
 `
 
 type CommitInfo struct {
@@ -639,10 +664,10 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		deploy.Framework = string(framework)
 		deploy.IsBackend = false
 
-		// Determine project type
+		// Determine project type - default to ProjectNode to ensure npm is available
 		projectType := ProjectType(project.ProjectType)
 		if projectType == "" {
-			projectType = ProjectStatic
+			projectType = ProjectNode // Default to Node.js which has npm
 		}
 
 		// Check if this is a Full Stack deployment
@@ -691,7 +716,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			d.broadcastPhase(deployID, "build", "Creating frontend container...")
 			logToDB("stdout", "Creating LXD container for frontend (nodejs + nginx)...")
 
-			frontendContainerInfo, frontendErr := d.lxd.CreateContainerWithUserData(deployCtx, project.ID+"-frontend", project.Name+"-frontend", "images:alpine/3.23", frontendSetupScript)
+			frontendContainerInfo, frontendErr := d.lxd.CreateContainerWithUserDataAndFramework(deployCtx, project.ID+"-frontend", project.Name+"-frontend", "images:alpine/3.23", frontendSetupScript, FrameworkReact)
 			if frontendErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create frontend container: %s", frontendErr.Error()))
 				d.failDeploy(deploy, frontendErr.Error())
@@ -730,10 +755,13 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			d.broadcastPhase(deployID, "build", "Building frontend...")
 			logToDB("stdout", "Building frontend...")
 			frontendWorkDir := fmt.Sprintf("/app/repo/%s", frontendDir)
+			// Fix npm cache before install
+			fixNpmCmd := "rm -rf /root/.npm /tmp/npm-* /root/.npm-* 2>/dev/null || true && mkdir -p /root/.npm"
+			d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, fixNpmCmd)
 			frontendBuildCmd := "npm install --legacy-peer-deps --prefer-offline --no-audit && npm run build"
 			frontendBuildResult, frontendBuildErr := d.lxd.RunCommandInContainerWithOptions(deployCtx, frontendContainerInfo.ID, frontendBuildCmd, ExecOptions{
 				WorkDir: frontendWorkDir,
-				Timeout: 15 * time.Minute,
+				Timeout: 30 * time.Minute,
 			})
 			if frontendBuildResult != nil {
 				for _, line := range frontendBuildResult.Lines {
@@ -754,9 +782,9 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 
 			nginxSetupCmd := fmt.Sprintf(
-				"mkdir -p /run/nginx /var/log/supervisor && "+
+				"mkdir -p /run/nginx /var/log/supervisor /etc/nginx/http.d && "+
 					"rm -f /etc/nginx/http.d/default.conf && "+
-					"printf 'server {\\n  listen 80;\\n  root %s;\\n  index index.html;\\n  location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
+					"printf 'server {\\n listen 80;\\n root %s;\\n index index.html;\\n location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
 					"nginx -t && "+
 					"printf '[program:nginx]\\ncommand=/usr/sbin/nginx -g \"daemon off;\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/nginx.log\\nstderr_logfile=/var/log/supervisor/nginx-err.log\\n' > /etc/supervisor.d/nginx.ini && "+
 					"rm -f /etc/supervisor.d/app.ini && "+
@@ -789,7 +817,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			d.broadcastPhase(deployID, "build", "Creating backend container (with Node.js)...")
 			logToDB("stdout", "Creating LXD container for backend...")
 
-			backendContainerInfo, backendErr := d.lxd.CreateContainerWithUserData(deployCtx, project.ID+"-backend", project.Name+"-backend", "images:alpine/3.23", nodejsSetupScript)
+			backendContainerInfo, backendErr := d.lxd.CreateContainerWithUserDataAndFramework(deployCtx, project.ID+"-backend", project.Name+"-backend", "images:alpine/3.23", nodejsSetupScript, backendFramework)
 			if backendErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create backend container: %s", backendErr.Error()))
 				d.failDeploy(deploy, backendErr.Error())
@@ -825,9 +853,12 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// Install backend dependencies
 			backendWorkDir := fmt.Sprintf("/app/repo/%s", backendDir)
+			// Fix npm cache before install
+			fixBackendNpmCmd := "rm -rf /root/.npm /tmp/npm-* /root/.npm-* 2>/dev/null || true && mkdir -p /root/.npm"
+			d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, fixBackendNpmCmd)
 			if _, err := d.lxd.RunCommandInContainerWithOptions(deployCtx, backendContainerInfo.ID, backendInstallCmd, ExecOptions{
 				WorkDir: backendWorkDir,
-				Timeout: 15 * time.Minute,
+				Timeout: 30 * time.Minute,
 			}); err != nil {
 				logToDB("stderr", fmt.Sprintf("Backend installation failed: %s", err.Error()))
 				d.failDeploy(deploy, err.Error())
@@ -990,13 +1021,25 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// installCmd and startCmd will be set after framework detection below
 			var startCmd string
 
-			// Pick the right setup script based on project type
+			// Pick the right setup script based on project type and framework
 			setupScript := nodejsSetupScript
 			setupLabel := "nodejs"
+
+			// Frontend frameworks need nginx
+			isFrontendFramework := framework == FrameworkReact || framework == FrameworkVue ||
+				framework == FrameworkAngular || framework == FrameworkSvelte ||
+				framework == FrameworkWebpack || framework == FrameworkVite ||
+				framework == FrameworkStatic
+
 			switch projectType {
 			case ProjectNode:
-				setupScript = nodejsSetupScript
-				setupLabel = "nodejs"
+				if isFrontendFramework {
+					setupScript = frontendSetupScript
+					setupLabel = "frontend"
+				} else {
+					setupScript = nodejsSetupScript
+					setupLabel = "nodejs"
+				}
 			case ProjectPython:
 				setupScript = pythonSetupScript
 				setupLabel = "python"
@@ -1010,7 +1053,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			// Create LXD container with type-specific setup
 			d.broadcastPhase(deployID, "build", fmt.Sprintf("Creating LXD container (%s)...", setupLabel))
-			containerInfo, containerErr := d.lxd.CreateContainerWithUserData(deployCtx, project.ID, project.Name, "images:alpine/3.23", setupScript)
+			containerInfo, containerErr := d.lxd.CreateContainerWithUserDataAndFramework(deployCtx, project.ID, project.Name, "images:alpine/3.23", setupScript, framework)
 			if containerErr != nil {
 				logToDB("stderr", fmt.Sprintf("Failed to create LXD container: %s", containerErr.Error()))
 				d.failDeploy(deploy, containerErr.Error())
@@ -1155,14 +1198,44 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 					}
 				}
 
-				installCmd := "npm install --legacy-peer-deps"
+				// CRITICAL: Check if npm is available, install if missing
+				npmCheckResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "which npm 2>/dev/null || echo 'not_found'")
+				if npmCheckResult != nil && len(npmCheckResult.Lines) > 0 {
+					if strings.Contains(npmCheckResult.Lines[0].Text, "not_found") {
+						logToDB("stdout", "npm not found in container, installing Node.js and npm...")
+						installNodejsCmd := "apk add --no-cache nodejs npm"
+						installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, installNodejsCmd)
+						if installResult != nil {
+							for _, line := range installResult.Lines {
+								logToDB(line.Stream, line.Text)
+							}
+						}
+						if installErr != nil || (installResult != nil && installResult.ExitCode != 0) {
+							logToDB("stderr", "Failed to install Node.js and npm in container")
+							d.failDeploy(deploy, "Failed to install Node.js and npm")
+							return
+						}
+						logToDB("stdout", "Node.js and npm installed successfully")
+					}
+				}
+
+				// Fix npm cache permissions before install
+				logToDB("stdout", "Fixing npm cache permissions...")
+				fixNpmCmd := "rm -rf /root/.npm /tmp/npm-* /root/.npm-* 2>/dev/null || true && mkdir -p /root/.npm"
+				d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, fixNpmCmd)
+
+				// Pre-warm npm cache with package.json dependencies
+				logToDB("stdout", "Pre-warming npm cache...")
+				d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "npm cache verify")
+
+				installCmd := "npm install --legacy-peer-deps --prefer-offline --no-audit --progress=false"
 				if project.InstallCommand != nil && *project.InstallCommand != "" {
 					installCmd = *project.InstallCommand
 				}
 				logToDB("stdout", fmt.Sprintf("Running: cd %s && %s", workDir, installCmd))
 				installResult, installErr := d.lxd.RunCommandInContainerWithOptions(deployCtx, containerInfo.ID, installCmd, ExecOptions{
 					WorkDir: workDir,
-					Timeout: 15 * time.Minute,
+					Timeout: 30 * time.Minute,
 				})
 
 				// Log all npm output
@@ -1361,6 +1434,27 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.broadcastPhase(deployID, "service", "Configuring nginx...")
 				logToDB("stdout", "Configuring nginx in container...")
 
+				// CRITICAL: Check if nginx is installed, install if missing
+				nginxCheckResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "which nginx 2>/dev/null || echo 'not_found'")
+				if nginxCheckResult != nil && len(nginxCheckResult.Lines) > 0 {
+					if strings.Contains(nginxCheckResult.Lines[0].Text, "not_found") {
+						logToDB("stdout", "nginx not found in container, installing nginx...")
+						installNginxCmd := "apk add --no-cache nginx"
+						installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, installNginxCmd)
+						if installResult != nil {
+							for _, line := range installResult.Lines {
+								logToDB(line.Stream, line.Text)
+							}
+						}
+						if installErr != nil || (installResult != nil && installResult.ExitCode != 0) {
+							logToDB("stderr", "Failed to install nginx in container")
+							d.failDeploy(deploy, "Failed to install nginx")
+							return
+						}
+						logToDB("stdout", "nginx installed successfully")
+					}
+				}
+
 				// Determine output directory
 				outputDir := "dist"
 				if project.OutputDir != "" {
@@ -1378,9 +1472,9 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 				// Create nginx config and supervisor entry
 				nginxSetupCmd := fmt.Sprintf(
-					"mkdir -p /run/nginx /var/log/supervisor && "+
+					"mkdir -p /run/nginx /var/log/supervisor /etc/nginx/http.d && "+
 						"rm -f /etc/nginx/http.d/default.conf && "+
-						"printf 'server {\\n  listen 80;\\n  root %s/%s;\\n  index index.html;\\n  location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
+						"printf 'server {\\n listen 80;\\n root %s/%s;\\n index index.html;\\n location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
 						"nginx -t && "+
 						"printf '[program:nginx]\\ncommand=/usr/sbin/nginx -g \"daemon off;\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/nginx.log\\nstderr_logfile=/var/log/supervisor/nginx-err.log\\n' > /etc/supervisor.d/nginx.ini && "+
 						"rm -f /etc/supervisor.d/app.ini && "+

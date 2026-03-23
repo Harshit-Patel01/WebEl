@@ -161,6 +161,9 @@ func (p *PerformanceOptimizer) optimizeSystem(ctx context.Context) {
 	if err != nil {
 		p.logger.Warn("Failed to increase file descriptor limits", zap.Error(err))
 	}
+
+	// Optimize network stack
+	p.optimizeNetworkStack(ctx)
 }
 
 func (p *PerformanceOptimizer) ensureLXDConfiguration(ctx context.Context) {
@@ -272,4 +275,43 @@ func (p *PerformanceOptimizer) LoadStats() error {
 
 	p.stats = &stats
 	return nil
+}
+
+func (p *PerformanceOptimizer) optimizeNetworkStack(ctx context.Context) {
+	// Optimize TCP settings
+	_, err := p.runner.Run(ctx, exec.RunOpts{
+		JobType: "network_tcp_optimize",
+		Command: "sudo",
+		Args: []string{"bash", "-c", `
+			echo 'net.core.rmem_max = 67108864' >> /etc/sysctl.conf
+			echo 'net.core.wmem_max = 67108864' >> /etc/sysctl.conf
+			echo 'net.ipv4.tcp_rmem = 4096 87380 67108864' >> /etc/sysctl.conf
+			echo 'net.ipv4.tcp_wmem = 4096 16384 67108864' >> /etc/sysctl.conf
+			echo 'net.ipv4.tcp_window_scaling = 1' >> /etc/sysctl.conf
+			echo 'net.ipv4.tcp_timestamps = 1' >> /etc/sysctl.conf
+			echo 'net.ipv4.tcp_sack = 1' >> /etc/sysctl.conf
+			sysctl -p
+		`},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		p.logger.Warn("Failed to optimize network stack", zap.Error(err))
+	}
+
+	// Optimize LXD bridge
+	_, err = p.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_bridge_optimize",
+		Command: "sudo",
+		Args: []string{"bash", "-c", `
+			# Increase LXD bridge MTU for better throughput
+			if command -v lxc >/dev/null 2>&1; then
+				lxc network set lxdbr0 ipv4.address 10.0.0.1/24
+				lxc network set lxdbr0 ipv6.address none
+			fi
+		`},
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		p.logger.Warn("Failed to optimize LXD bridge", zap.Error(err))
+	}
 }

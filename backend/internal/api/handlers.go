@@ -1633,12 +1633,12 @@ func (h *containerHandlers) getContainerStatus(w http.ResponseWriter, r *http.Re
 	}
 
 	respondOK(w, map[string]interface{}{
-		"containerID":    container.ContainerID,
-		"containerName":  container.Name,
+		"containerID":     container.ContainerID,
+		"containerName":   container.Name,
 		"containerStatus": lxdStatus,
 		"serviceStatus":   serviceStatus,
-		"portMappings":   container.PortMappings,
-		"status":         container.Status,
+		"portMappings":    container.PortMappings,
+		"status":          container.Status,
 	})
 }
 
@@ -1658,7 +1658,7 @@ func (h *containerHandlers) getAppServiceStatus(w http.ResponseWriter, r *http.R
 	}
 
 	respondOK(w, map[string]string{
-		"status": serviceStatus,
+		"status":      serviceStatus,
 		"containerID": container.ContainerID,
 	})
 }
@@ -1737,7 +1737,7 @@ func (h *containerHandlers) getAppServiceLogs(w http.ResponseWriter, r *http.Req
 	}
 
 	respondOK(w, map[string]string{
-		"logs": logs,
+		"logs":        logs,
 		"containerID": container.ContainerID,
 	})
 }
@@ -1853,4 +1853,62 @@ func (h *apHandlers) disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondOK(w, map[string]string{"status": "disabled"})
+}
+
+// Image management handlers
+
+func (h *containerHandlers) listImages(w http.ResponseWriter, r *http.Request) {
+	if h.lxd == nil || h.lxd.ImageBuilder == nil {
+		respondError(w, http.StatusServiceUnavailable, "LXD service not available")
+		return
+	}
+
+	images, err := h.lxd.ImageBuilder.ListImages(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]interface{}{
+		"images": images,
+	})
+}
+
+func (h *containerHandlers) buildImage(w http.ResponseWriter, r *http.Request) {
+	if h.lxd == nil || h.lxd.ImageBuilder == nil {
+		respondError(w, http.StatusServiceUnavailable, "LXD service not available")
+		return
+	}
+
+	imageTypeParam := chi.URLParam(r, "imageType")
+	imageType := services.ImageType(imageTypeParam)
+
+	if err := h.lxd.ImageBuilder.EnsureImage(r.Context(), imageType); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{
+		"status": "built",
+		"image":  string(imageType),
+	})
+}
+
+func (h *containerHandlers) deleteImage(w http.ResponseWriter, r *http.Request) {
+	if h.lxd == nil || h.lxd.ImageBuilder == nil {
+		respondError(w, http.StatusServiceUnavailable, "LXD service not available")
+		return
+	}
+
+	imageName := chi.URLParam(r, "imageName")
+
+	if err := h.lxd.ImageBuilder.DeleteImage(r.Context(), imageName); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]string{
+		"status": "deleted",
+		"image":  imageName,
+	})
 }
