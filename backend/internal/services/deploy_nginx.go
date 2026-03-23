@@ -10,16 +10,25 @@ import (
 	"go.uber.org/zap"
 )
 
-
-func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) error {
+func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) (nginxListenPort int, err error) {
 	if d.nginx == nil {
-		return fmt.Errorf("nginx service not configured")
+		return 0, fmt.Errorf("nginx service not configured")
 	}
 
 	// Validate domain
 	if !IsValidDomain(domain) {
-		return fmt.Errorf("invalid domain: %s", domain)
+		return 0, fmt.Errorf("invalid domain: %s", domain)
 	}
+
+	// Allocate a unique host nginx listen port for this service
+	nginxListenPort, err = d.portAllocator.AllocatePort(fmt.Sprintf("nginx-%s", domain))
+	if err != nil {
+		return 0, fmt.Errorf("failed to allocate nginx listen port: %w", err)
+	}
+	d.logger.Info("allocated nginx listen port",
+		zap.String("domain", domain),
+		zap.Int("nginxPort", nginxListenPort),
+	)
 
 	// Generate config filename based on type
 	var configName string
@@ -33,6 +42,7 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		zap.String("domain", domain),
 		zap.String("configName", configName),
 		zap.Bool("isBackend", isBackend),
+		zap.Int("listenPort", nginxListenPort),
 	)
 
 	// Determine proxy settings for backend
@@ -83,6 +93,7 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 	siteCfg := NginxSiteConfig{
 		Domain:               domain,
 		FrontendPath:         outputPath,
+		ListenPort:           nginxListenPort,
 		ProxyEnabled:         proxyEnabled,
 		ProxyPort:            proxyPort,
 		FrontendProxyEnabled: frontendProxyEnabled,
@@ -99,26 +110,27 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 
 	// Write config atomically (use configName instead of domain)
 	if err := d.nginx.WriteConfig(configName, configContent); err != nil {
-		return fmt.Errorf("failed to write nginx config: %w", err)
+		return 0, fmt.Errorf("failed to write nginx config: %w", err)
 	}
 
 	// Test config before reload
 	testResult, err := d.nginx.TestConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("nginx config test failed: %w", err)
+		return 0, fmt.Errorf("nginx config test failed: %w", err)
 	}
 	if !testResult.Success {
-		return fmt.Errorf("nginx config test failed: %s", testResult.Output)
+		return 0, fmt.Errorf("nginx config test failed: %s", testResult.Output)
 	}
 
 	// Reload nginx
 	if err := d.nginx.Reload(ctx); err != nil {
-		return fmt.Errorf("failed to reload nginx: %w", err)
+		return 0, fmt.Errorf("failed to reload nginx: %w", err)
 	}
 
 	d.logger.Info("nginx configured successfully",
 		zap.String("domain", domain),
 		zap.String("configName", configName),
+		zap.Int("listenPort", nginxListenPort),
 		zap.String("outputPath", outputPath),
 		zap.Bool("proxyEnabled", proxyEnabled),
 		zap.Int("proxyPort", proxyPort),
@@ -126,7 +138,7 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		zap.Int("frontendProxyPort", frontendProxyPort),
 	)
 
-	return nil
+	return nginxListenPort, nil
 }
 
 // parsePortMapping extracts host and container ports from the JSON port_mappings field
