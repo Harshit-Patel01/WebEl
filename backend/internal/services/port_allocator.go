@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,17 @@ func NewPortAllocator(db *state.DB, runner *exec.Runner, poolStart, poolEnd int)
 	}
 }
 
+// isPortAvailableOnHost checks if a port is available on the host by attempting to listen on it
+func isPortAvailableOnHost(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	listener.Close()
+	return true
+}
+
 // AllocatePort allocates a unique port for a project
 // Returns the allocated port or an error if no ports are available
 func (pa *PortAllocator) AllocatePort(projectID string) (int, error) {
@@ -46,7 +58,12 @@ func (pa *PortAllocator) AllocatePort(projectID string) (int, error) {
 	// Find first available port in the pool
 	for port := pa.poolStart; port <= pa.poolEnd; port++ {
 		if !allocatedPorts[port] {
-			return port, nil
+			// Verify the port is actually available on the host
+			if isPortAvailableOnHost(port) {
+				return port, nil
+			}
+			// Port is in use by another process on the host, mark it as allocated and try next
+			allocatedPorts[port] = true
 		}
 	}
 
@@ -169,7 +186,12 @@ func (pa *PortAllocator) GetNextAvailablePort() (int, error) {
 
 	for port := pa.poolStart; port <= pa.poolEnd; port++ {
 		if !allocatedPorts[port] {
-			return port, nil
+			// Verify the port is actually available on the host
+			if isPortAvailableOnHost(port) {
+				return port, nil
+			}
+			// Port is in use by another process on the host, mark it as allocated and try next
+			allocatedPorts[port] = true
 		}
 	}
 

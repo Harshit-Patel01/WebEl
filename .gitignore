@@ -30,6 +30,7 @@ pnpm-debug.log*
 .pnpm-store/
 package-lock.json
 yarn.lock
+LXC_CHANGES.md
 pnpm-lock.yaml
 
 # Next.js
