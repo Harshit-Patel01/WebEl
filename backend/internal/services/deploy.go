@@ -1412,10 +1412,23 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.broadcastPhase(deployID, "service", "Starting service...")
 				logToDB("stdout", "Configuring backend service with supervisor...")
 
+				// Create proper supervisor config for backend service
+				// This ensures the service persists across container restarts
 				supervisorConfig := fmt.Sprintf(
-					"printf '[program:app]\\ndirectory=%s\\ncommand=/bin/sh -c \"%s\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/app.log\\nstderr_logfile=/var/log/supervisor/app-err.log\\n' > /etc/supervisor.d/app.ini && "+
+					"mkdir -p /var/log/supervisor && "+
+						"printf '[program:app]\\n"+
+						"directory=%s\\n"+
+						"command=/bin/sh -c \"%s\"\\n"+
+						"autostart=true\\n"+
+						"autorestart=true\\n"+
+						"startsecs=3\\n"+
+						"stdout_logfile=/var/log/supervisor/app.log\\n"+
+						"stdout_logfile_maxbytes=10MB\\n"+
+						"stderr_logfile=/var/log/supervisor/app-err.log\\n"+
+						"stderr_logfile_maxbytes=10MB\\n"+
+						"environment=PORT=\"%d\",NODE_ENV=\"production\"\\n' > /etc/supervisor.d/app.ini && "+
 						"supervisorctl reread && supervisorctl update && supervisorctl start app",
-					workDir, startCmd,
+					workDir, startCmd, containerPort,
 				)
 				svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, supervisorConfig)
 				if svcResult != nil {
@@ -1471,12 +1484,23 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				}
 
 				// Create nginx config and supervisor entry
+				// Simple nginx config that just serves static files on port 80
 				nginxSetupCmd := fmt.Sprintf(
 					"mkdir -p /run/nginx /var/log/supervisor /etc/nginx/http.d && "+
 						"rm -f /etc/nginx/http.d/default.conf && "+
-						"printf 'server {\\n listen 80;\\n root %s/%s;\\n index index.html;\\n location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
+						"printf 'server {\\n listen 80 default_server;\\n root %s/%s;\\n index index.html;\\n "+
+						"location / { try_files $uri $uri/ /index.html; }\\n "+
+						"location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ { expires 30d; add_header Cache-Control \"public, immutable\"; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
 						"nginx -t && "+
-						"printf '[program:nginx]\\ncommand=/usr/sbin/nginx -g \"daemon off;\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/nginx.log\\nstderr_logfile=/var/log/supervisor/nginx-err.log\\n' > /etc/supervisor.d/nginx.ini && "+
+						"printf '[program:nginx]\\n"+
+						"command=/usr/sbin/nginx -g \"daemon off;\"\\n"+
+						"autostart=true\\n"+
+						"autorestart=true\\n"+
+						"startsecs=3\\n"+
+						"stdout_logfile=/var/log/supervisor/nginx.log\\n"+
+						"stdout_logfile_maxbytes=10MB\\n"+
+						"stderr_logfile=/var/log/supervisor/nginx-err.log\\n"+
+						"stderr_logfile_maxbytes=10MB\\n' > /etc/supervisor.d/nginx.ini && "+
 						"rm -f /etc/supervisor.d/app.ini && "+
 						"supervisorctl reread && supervisorctl update && supervisorctl start nginx",
 					workDir, outputDir,
