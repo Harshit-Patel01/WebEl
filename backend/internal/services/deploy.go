@@ -23,7 +23,7 @@ const (
 	ProjectNode   ProjectType = "node"
 	ProjectPython ProjectType = "python"
 	ProjectGo     ProjectType = "go"
-	ProjectStatic ProjectType = "static"n
+	ProjectStatic ProjectType = "static"
 )
 
 // networkWait waits for container network/DNS to be ready before installing packages.
@@ -1834,62 +1834,4 @@ func isValidRepoURL(url string) bool {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// logDirectoryListing logs a tree-style listing of the output directory.
-func (d *DeployService) logDirectoryListing(dir, deployID string, logToDB func(string, string)) {
-	logToDB("stdout", "Output files:")
-	logToDB("stdout", "─────────────────────────────────")
-
-	var totalSize int64
-	var fileCount int
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-
-		rel, _ := filepath.Rel(dir, path)
-		if rel == "." {
-			return nil
-		}
-
-		// Calculate indent based on depth
-		depth := strings.Count(rel, string(os.PathSeparator))
-		indent := strings.Repeat("  ", depth)
-		name := filepath.Base(rel)
-
-		if info.IsDir() {
-			logToDB("stdout", fmt.Sprintf("%s📁 %s/", indent, name))
-		} else {
-			size := info.Size()
-			totalSize += size
-			fileCount++
-			logToDB("stdout", fmt.Sprintf("%s   %s (%s)", indent, name, formatFileSize(size)))
-		}
-		return nil
-	})
-
-	if err != nil {
-		logToDB("stderr", fmt.Sprintf("Failed to list output directory: %s", err.Error()))
-		return
-	}
-
-	logToDB("stdout", "─────────────────────────────────")
-	logToDB("stdout", fmt.Sprintf("Total: %d files (%s)", fileCount, formatFileSize(totalSize)))
-}
-
-func formatFileSize(bytes int64) string {
-	const (
-		KB = 1024
-		MB = 1024 * KB
-	)
-	switch {
-	case bytes >= MB:
-		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(MB))
-	case bytes >= KB:
-		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(KB))
-	default:
-		return fmt.Sprintf("%d B", bytes)
-	}
 }

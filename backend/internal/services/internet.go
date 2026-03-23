@@ -6,8 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/opendeploy/opendeploy/internal/exec"
@@ -156,48 +154,5 @@ func (s *InternetService) checkDownloadSpeed(ctx context.Context) *CheckResult {
 	return &CheckResult{
 		Success: true,
 		Value:   fmt.Sprintf("%.1f Mbps", mbps),
-	}
-}
-
-// Alternative ping using system ping command
-func (s *InternetService) checkPingCommand(ctx context.Context) *CheckResult {
-	result, err := s.runner.Run(ctx, exec.RunOpts{
-		JobType: "internet_ping",
-		Command: "ping",
-		Args:    []string{"-c", "3", "1.1.1.1"},
-		Timeout: 10 * time.Second,
-	})
-
-	if err != nil || !result.Success {
-		return &CheckResult{
-			Success: false,
-			Value:   "0ms",
-			Error:   "ping failed",
-		}
-	}
-
-	// Parse ping output to get average time
-	for _, line := range result.Lines {
-		if line.Stream == "stdout" && strings.Contains(line.Text, "avg") {
-			// Example: rtt min/avg/max/mdev = 10.123/15.456/20.789/5.123 ms
-			parts := strings.Split(line.Text, "=")
-			if len(parts) == 2 {
-				times := strings.Split(strings.TrimSpace(parts[1]), "/")
-				if len(times) >= 2 {
-					avgStr := strings.TrimSpace(times[1])
-					if avg, err := strconv.ParseFloat(avgStr, 64); err == nil {
-						return &CheckResult{
-							Success: true,
-							Value:   fmt.Sprintf("%.0fms", avg),
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return &CheckResult{
-		Success: true,
-		Value:   "< 50ms",
 	}
 }
