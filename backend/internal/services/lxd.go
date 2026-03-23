@@ -188,22 +188,42 @@ func GetStartCommand(framework FrameworkType, dir string) string {
 	}
 }
 
+// GetImageTypeForFramework maps framework types to pre-built image types
+func GetImageTypeForFramework(framework FrameworkType) ImageType {
+	switch framework {
+	case FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkReact, FrameworkVue, FrameworkAngular, FrameworkSvelte, FrameworkWebpack, FrameworkVite:
+		return ImageFrontend
+	case FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkNode:
+		return ImageNodeJS
+	case FrameworkFlask, FrameworkDjango, FrameworkFastAPI:
+		return ImagePython
+	case FrameworkGo:
+		return ImageGo
+	case FrameworkStatic:
+		return ImageStatic
+	default:
+		return ImageNodeJS // Default to NodeJS
+	}
+}
+
 // LXDService handles LXD container-based deployments
 type LXDService struct {
-	runner      *exec.Runner
-	cfg         config.DeployConfig
-	db          *state.DB
-	logger      *zap.Logger
-	initialized bool
+	runner       *exec.Runner
+	cfg          config.DeployConfig
+	db           *state.DB
+	logger       *zap.Logger
+	initialized  bool
+	ImageBuilder *ImageBuilder
 }
 
 func NewLXDService(runner *exec.Runner, cfg config.DeployConfig, db *state.DB, logger *zap.Logger) *LXDService {
 	return &LXDService{
-		runner:      runner,
-		cfg:         cfg,
-		db:          db,
-		logger:      logger,
-		initialized: false,
+		runner:       runner,
+		cfg:          cfg,
+		db:           db,
+		logger:       logger,
+		initialized:  false,
+		ImageBuilder: NewImageBuilder(runner, logger),
 	}
 }
 
@@ -268,12 +288,35 @@ func (l *LXDService) CreateContainer(ctx context.Context, projectID, projectName
 // The user-data is a shell script that runs after container creation but before the container is started,
 // so the container is fully ready when returned.
 func (l *LXDService) CreateContainerWithUserData(ctx context.Context, projectID, projectName, image, userData string) (*ContainerInfo, error) {
+	return l.CreateContainerWithUserDataAndFramework(ctx, projectID, projectName, image, userData, FrameworkUnknown)
+}
+
+// CreateContainerWithUserDataAndFramework creates an LXD container using pre-built images when available
+func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context, projectID, projectName, image, userData string, framework FrameworkType) (*ContainerInfo, error) {
 	// Ensure LXD is initialized
 	if err := l.EnsureLXDInitialized(ctx); err != nil {
 		return nil, fmt.Errorf("LXD initialization failed: %w", err)
 	}
 
 	containerName := fmt.Sprintf("opendeploy-%s-%d", projectName, time.Now().Unix())
+
+	// Use pre-built image if available for the framework
+	if framework != FrameworkUnknown {
+		imageType := GetImageTypeForFramework(framework)
+		preBuiltImage := l.ImageBuilder.GetImageName(imageType)
+
+		// Check if pre-built image exists
+		if err := l.ImageBuilder.EnsureImage(ctx, imageType); err == nil {
+			l.logger.Info("using pre-built image",
+				zap.String("image", preBuiltImage),
+				zap.String("framework", string(framework)))
+			image = preBuiltImage
+		} else {
+			l.logger.Warn("pre-built image not available, using base image",
+				zap.String("framework", string(framework)),
+				zap.Error(err))
+		}
+	}
 
 	// Check if container already exists
 	existingContainer, _ := l.db.GetContainerByName(containerName)
@@ -317,6 +360,15 @@ func (l *LXDService) CreateContainerWithUserData(ctx context.Context, projectID,
 
 	containerID := containerName
 
+	// Configure container network optimizations
+	l.logger.Info("configuring container network", zap.String("containerId", containerID))
+	l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_config",
+		Command: "lxc",
+		Args:    []string{"config", "set", containerID, "limits.network.priority", "10"},
+		Timeout: 10 * time.Second,
+	})
+
 	// Start the container
 	l.logger.Info("starting container", zap.String("containerId", containerID))
 	startResult, startErr := l.runner.Run(ctx, exec.RunOpts{
@@ -332,22 +384,6 @@ func (l *LXDService) CreateContainerWithUserData(ctx context.Context, projectID,
 
 	// Wait for container to be ready and get network
 	time.Sleep(5 * time.Second)
-
-	// Ensure shared cache directory exists on the host
-	os.MkdirAll("/opt/shared/npm-cache", 0755)
-
-	// Bind-mount shared npm cache directory into the container for faster subsequent installs
-	l.runner.Run(ctx, exec.RunOpts{
-		JobType: "lxd_add_disk_device",
-		Command: "lxc",
-		Args: []string{
-			"config", "device", "add", containerID,
-			"shared-npm-cache", "disk",
-			"source=/opt/shared/npm-cache",
-			"path=/root/.npm",
-		},
-		Timeout: 15 * time.Second,
-	})
 
 	// Execute user-data setup script if provided
 	// (Alpine doesn't have cloud-init, so we run it directly)

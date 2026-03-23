@@ -231,6 +231,11 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Put("/ap/config", apH.updateConfig)
 			r.Post("/ap/enable", apH.enable)
 			r.Post("/ap/disable", apH.disable)
+
+			// Image Management
+			r.Get("/images", containerH.listImages)
+			r.Post("/images/{imageType}/build", containerH.buildImage)
+			r.Delete("/images/{imageName}", containerH.deleteImage)
 		})
 	})
 
