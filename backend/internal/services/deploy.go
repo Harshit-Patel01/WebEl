@@ -885,6 +885,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, writeEnvCmd)
 			}
 
+			// Ensure startCmd has a fallback - if empty, use npm start
+			if startCmd == "" {
+				startCmd = "npm start"
+			}
+
 			// Start backend service via supervisor
 			logToDB("stdout", "Configuring backend service with supervisor...")
 			supervisorConfig := fmt.Sprintf(
@@ -1412,6 +1417,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.broadcastPhase(deployID, "service", "Starting service...")
 				logToDB("stdout", "Configuring backend service with supervisor...")
 
+				// Ensure startCmd has a fallback - if empty, use npm start
+				if startCmd == "" {
+					startCmd = "npm start"
+				}
+
 				// Create proper supervisor config for backend service
 				// This ensures the service persists across container restarts
 				supervisorConfig := fmt.Sprintf(
@@ -1563,7 +1573,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				}
 
 				if domainToUse != "" {
-					nginxPort, err := d.applyNginxForDeploy(deployCtx, project, domainToUse, "", isBackend, 0, backendProxyPort)
+					nginxPort, err := d.applyNginxForDeploy(deployCtx, project, domainToUse, "", isBackend, frontendProxyPort, backendProxyPort)
 					if err != nil {
 						logToDB("stderr", fmt.Sprintf("Nginx configuration failed: %s", err.Error()))
 						d.logger.Error("nginx apply failed", zap.String("deployId", deployID), zap.String("domain", domainToUse), zap.Error(err))

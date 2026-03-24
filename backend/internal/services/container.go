@@ -318,6 +318,15 @@ func (c *ContainerService) RestartContainerByName(ctx context.Context, container
 		Timeout: 15 * time.Second,
 	})
 
+	// Ensure app service is started (in case it was FATAL from a previous failure)
+	time.Sleep(1 * time.Second)
+	c.runner.Run(ctx, exec.RunOpts{
+		JobType: "start_app_svc",
+		Command: "lxc",
+		Args:    []string{"exec", container.ContainerID, "--", "/bin/sh", "-c", "supervisorctl reread && supervisorctl update && supervisorctl start app 2>/dev/null || true"},
+		Timeout: 15 * time.Second,
+	})
+
 	// Update status in database
 	container.Status = "running"
 	c.db.UpdateContainer(container)
@@ -369,6 +378,15 @@ func (c *ContainerService) RestartContainer(ctx context.Context, projectID strin
 		JobType: "start_supervisord",
 		Command: "lxc",
 		Args:    []string{"exec", container.ContainerID, "--", "/bin/sh", "-c", "pgrep supervisord || supervisord -c /etc/supervisord.conf"},
+		Timeout: 15 * time.Second,
+	})
+
+	// Ensure app service is started (in case it was FATAL from a previous failure)
+	time.Sleep(1 * time.Second)
+	c.runner.Run(ctx, exec.RunOpts{
+		JobType: "start_app_svc",
+		Command: "lxc",
+		Args:    []string{"exec", container.ContainerID, "--", "/bin/sh", "-c", "supervisorctl reread && supervisorctl update && supervisorctl start app 2>/dev/null || true"},
 		Timeout: 15 * time.Second,
 	})
 
