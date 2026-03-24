@@ -43,7 +43,7 @@ const (
 // IsBackendFramework returns true if the framework is a backend framework that needs to be served
 func IsBackendFramework(framework FrameworkType) bool {
 	switch framework {
-	case FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkFlask, FrameworkDjango, FrameworkFastAPI, FrameworkGo:
+	case FrameworkNode, FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkFlask, FrameworkDjango, FrameworkFastAPI, FrameworkGo:
 		return true
 	case FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix:
 		return true // SSR frameworks that run a Node.js server
@@ -83,7 +83,7 @@ func GetDefaultPort(framework FrameworkType) int {
 // GetDefaultInstallCommand returns the default install command for the framework
 func GetDefaultInstallCommand(framework FrameworkType) string {
 	switch framework {
-	case FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkReact, FrameworkVue, FrameworkAngular, FrameworkSvelte, FrameworkWebpack, FrameworkVite, FrameworkNode:
+	case FrameworkNode, FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkReact, FrameworkVue, FrameworkAngular, FrameworkSvelte, FrameworkWebpack, FrameworkVite:
 		return "npm install --prefer-offline --no-audit --progress=false"
 	case FrameworkFlask:
 		return "pip install -r requirements.txt"
@@ -193,7 +193,7 @@ func GetImageTypeForFramework(framework FrameworkType) ImageType {
 	switch framework {
 	case FrameworkNextJS, FrameworkNuxtJS, FrameworkRemix, FrameworkReact, FrameworkVue, FrameworkAngular, FrameworkSvelte, FrameworkWebpack, FrameworkVite:
 		return ImageFrontend
-	case FrameworkNestJS, FrameworkExpress, FrameworkFastify, FrameworkNode:
+	case FrameworkNode, FrameworkNestJS, FrameworkExpress, FrameworkFastify:
 		return ImageNodeJS
 	case FrameworkFlask, FrameworkDjango, FrameworkFastAPI:
 		return ImagePython
@@ -1108,7 +1108,7 @@ func (l *LXDService) GetAppServiceStatus(ctx context.Context, containerID string
 
 // GetAppServiceLogs gets the application service logs from the container
 func (l *LXDService) GetAppServiceLogs(ctx context.Context, containerID string, lines int) (string, error) {
-	logCmd := fmt.Sprintf("tail -n %d /var/log/opendeploy-app.log", lines)
+	logCmd := fmt.Sprintf("(tail -n %d /var/log/supervisor/app.log 2>/dev/null; echo STDERR_SEP; tail -n %d /var/log/supervisor/app-err.log 2>/dev/null) || tail -n %d /var/log/opendeploy-app.log 2>/dev/null || echo no_logs_found", lines, lines, lines)
 	result, err := l.RunCommandInContainer(ctx, containerID, logCmd)
 	if err != nil {
 		return "", err
