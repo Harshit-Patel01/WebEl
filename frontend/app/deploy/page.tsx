@@ -23,7 +23,6 @@ export default function DeployPage() {
   const [buildCmd, setBuildCmd] = useState('npm run build')
   const [installCmd, setInstallCmd] = useState('')
   const [startCmd, setStartCmd] = useState('')
-  const [localPort, setLocalPort] = useState('')
   const [outputDir, setOutputDir] = useState('')
   const [workingDir, setWorkingDir] = useState('')
   const [frontendWorkingDir, setFrontendWorkingDir] = useState('')
@@ -72,6 +71,7 @@ export default function DeployPage() {
   const [loadingZones, setLoadingZones] = useState(false)
   const [deploymentTarget, setDeploymentTarget] = useState<'local' | 'internet'>('local')
   const [backendPort, setBackendPort] = useState('')
+  const [hostPort, setHostPort] = useState('')
   const [hasTunnelSetup, setHasTunnelSetup] = useState(false)
   const [checkingTunnel, setCheckingTunnel] = useState(true)
   const [availableProjects, setAvailableProjects] = useState<any[]>([])
@@ -258,7 +258,7 @@ export default function DeployPage() {
           backend_working_directory: projectType === 'full_stack' ? backendWorkingDir : '',
           backend_install_command: projectType === 'full_stack' ? backendInstallCmd : '',
           backend_build_command: projectType === 'full_stack' ? backendBuildCmd : '',
-          local_port: localPort ? parseInt(localPort) : (backendPort ? parseInt(backendPort) : 0),
+          local_port: backendPort ? parseInt(backendPort) : 0,
           domain: domain || subdomain ? (subdomain ? `${subdomain}.${domain}` : domain) : '',
           deployment_target: deploymentTarget,
           env_vars: JSON.stringify(envObj),
@@ -315,6 +315,10 @@ export default function DeployPage() {
 
       // 3. Trigger deploy
       const deployOptions: any = {}
+
+      if (hostPort) {
+        deployOptions.host_port = parseInt(hostPort)
+      }
 
       if (attachToProjectId) {
         deployOptions.attach_to_project_id = attachToProjectId
@@ -910,6 +914,22 @@ export default function DeployPage() {
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
                             The internal port your app listens on. (A free external port will be mapped automatically)
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block font-mono text-[11px] text-text-secondary mb-2">
+                            Host Port (Optional)
+                          </label>
+                          <input
+                            value={hostPort}
+                            onChange={e => setHostPort(e.target.value)}
+                            disabled={deploying}
+                            type="number"
+                            className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
+                            placeholder="Auto-assign"
+                          />
+                          <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
+                            Specific host port to map to. Leave blank for auto-assignment from the pool.
                           </p>
                         </div>
                       </>
