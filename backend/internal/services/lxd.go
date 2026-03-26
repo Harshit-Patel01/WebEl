@@ -108,9 +108,9 @@ func GetDefaultStartCommand(framework FrameworkType, port int) string {
 	case FrameworkNestJS:
 		return fmt.Sprintf("npm run start -- --port %d", port)
 	case FrameworkExpress:
-		return fmt.Sprintf("PORT=%d node server.js", port)
+		return fmt.Sprintf("node server.js")
 	case FrameworkFastify:
-		return fmt.Sprintf("PORT=%d node server.js", port)
+		return fmt.Sprintf("node server.js")
 	case FrameworkFlask:
 		return fmt.Sprintf("FLASK_APP=app.py flask run --host=0.0.0.0 --port %d", port)
 	case FrameworkDjango:
@@ -118,9 +118,9 @@ func GetDefaultStartCommand(framework FrameworkType, port int) string {
 	case FrameworkFastAPI:
 		return fmt.Sprintf("uvicorn main:app --host 0.0.0.0 --port %d", port)
 	case FrameworkGo:
-		return fmt.Sprintf("./server -port=%d", port)
+		return fmt.Sprintf("./server")
 	case FrameworkNode:
-		return fmt.Sprintf("PORT=%d node server.js", port)
+		return fmt.Sprintf("node server.js")
 	case FrameworkRemix:
 		return fmt.Sprintf("npm run start -- --port %d", port)
 	default:
@@ -852,6 +852,75 @@ func (l *LXDService) SetupPortProxy(ctx context.Context, containerID string, con
 	return nil
 }
 
+// UpdatePortMapping changes the host and/or container port mapping for a running container.
+// It removes the old proxy device and adds a new one with the updated ports.
+func (l *LXDService) UpdatePortMapping(ctx context.Context, containerID string, oldContainerPort, newContainerPort, newHostPort int) error {
+	l.logger.Info("updating port mapping",
+		zap.String("containerId", containerID),
+		zap.Int("oldContainerPort", oldContainerPort),
+		zap.Int("newContainerPort", newContainerPort),
+		zap.Int("newHostPort", newHostPort),
+	)
+
+	oldDeviceName := fmt.Sprintf("proxy-%d", oldContainerPort)
+	newDeviceName := fmt.Sprintf("proxy-%d", newContainerPort)
+
+	// Remove the existing proxy device
+	removeResult, removeErr := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_proxy_remove",
+		Command: "lxc",
+		Args:    []string{"config", "device", "remove", containerID, oldDeviceName},
+		Timeout: 10 * time.Second,
+	})
+
+	if removeErr != nil || (removeResult != nil && !removeResult.Success) {
+		var errMsg string
+		if removeResult != nil {
+			for _, line := range removeResult.Lines {
+				if line.Stream == "stderr" {
+					errMsg += line.Text + "\n"
+				}
+			}
+		}
+		return fmt.Errorf("failed to remove old port proxy: %s (error: %v)", errMsg, removeErr)
+	}
+
+	// Add the new proxy device with updated ports
+	addResult, addErr := l.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_proxy_add",
+		Command: "lxc",
+		Args: []string{
+			"config", "device", "add", containerID,
+			newDeviceName,
+			"proxy",
+			fmt.Sprintf("listen=tcp:0.0.0.0:%d", newHostPort),
+			fmt.Sprintf("connect=tcp:127.0.0.1:%d", newContainerPort),
+		},
+		Timeout: 10 * time.Second,
+	})
+
+	if addErr != nil || (addResult != nil && !addResult.Success) {
+		var errMsg string
+		if addResult != nil {
+			for _, line := range addResult.Lines {
+				if line.Stream == "stderr" {
+					errMsg += line.Text + "\n"
+				}
+			}
+		}
+		return fmt.Errorf("failed to add new port proxy: %s (error: %v)", errMsg, addErr)
+	}
+
+	l.logger.Info("port mapping updated successfully",
+		zap.String("containerId", containerID),
+		zap.Int("oldContainerPort", oldContainerPort),
+		zap.Int("newContainerPort", newContainerPort),
+		zap.Int("newHostPort", newHostPort),
+	)
+
+	return nil
+}
+
 // CopyFilesToContainer copies files to an LXD container
 func (l *LXDService) CopyFilesToContainer(ctx context.Context, containerID, sourcePath, destPath string) error {
 	l.logger.Info("copying files to container",
@@ -1064,43 +1133,54 @@ func (l *LXDService) DetectFrameworkInContainer(ctx context.Context, containerID
 
 // StartAppService starts the OpenRC managed application service in the container
 func (l *LXDService) StartAppService(ctx context.Context, containerID string) error {
-	// Start the OpenRC service
-	_, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app start")
+	// Start all PM2 managed processes
+	_, err := l.RunCommandInContainer(ctx, containerID, "pm2 start all")
 	return err
 }
 
-// StopAppService stops the OpenRC managed application service in the container
+// StopAppService stops all PM2 managed application processes in the container
 func (l *LXDService) StopAppService(ctx context.Context, containerID string) error {
-	// Stop the OpenRC service
-	_, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app stop")
+	// Stop all PM2 managed processes
+	_, err := l.RunCommandInContainer(ctx, containerID, "pm2 stop all")
 	return err
 }
 
-// RestartAppService restarts the OpenRC managed application service in the container
+// RestartAppService restarts all PM2 managed application processes in the container
 func (l *LXDService) RestartAppService(ctx context.Context, containerID string) error {
-	// Restart the OpenRC service
-	_, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app restart")
+	// Restart all PM2 managed processes
+	_, err := l.RunCommandInContainer(ctx, containerID, "pm2 restart all")
 	return err
 }
 
-// GetAppServiceStatus gets the status of the application service in the container
+// GetAppServiceStatus gets the status of PM2 managed application processes in the container
 func (l *LXDService) GetAppServiceStatus(ctx context.Context, containerID string) (string, error) {
-	result, err := l.RunCommandInContainer(ctx, containerID, "rc-service opendeploy-app status")
+	result, err := l.RunCommandInContainer(ctx, containerID, "pm2 jlist")
 	if err != nil {
 		return "unknown", err
 	}
 
-	// Parse status from output
+	// Parse status from pm2 jlist JSON output
+	var output strings.Builder
 	for _, line := range result.Lines {
 		if line.Stream == "stdout" {
-			if strings.Contains(line.Text, "started") {
-				return "running", nil
-			} else if strings.Contains(line.Text, "stopped") {
-				return "stopped", nil
-			} else if strings.Contains(line.Text, "crashed") {
-				return "failed", nil
-			}
+			output.WriteString(line.Text)
 		}
+	}
+
+	jsonStr := strings.TrimSpace(output.String())
+	if jsonStr == "" || jsonStr == "[]" {
+		return "stopped", nil
+	}
+
+	// Check for any running processes in the JSON
+	if strings.Contains(jsonStr, `"status":"online"`) {
+		return "running", nil
+	}
+	if strings.Contains(jsonStr, `"status":"stopped"`) {
+		return "stopped", nil
+	}
+	if strings.Contains(jsonStr, `"status":"errored"`) {
+		return "failed", nil
 	}
 
 	return "unknown", nil
@@ -1108,7 +1188,7 @@ func (l *LXDService) GetAppServiceStatus(ctx context.Context, containerID string
 
 // GetAppServiceLogs gets the application service logs from the container
 func (l *LXDService) GetAppServiceLogs(ctx context.Context, containerID string, lines int) (string, error) {
-	logCmd := fmt.Sprintf("(tail -n %d /var/log/supervisor/app.log 2>/dev/null; echo STDERR_SEP; tail -n %d /var/log/supervisor/app-err.log 2>/dev/null) || tail -n %d /var/log/opendeploy-app.log 2>/dev/null || echo no_logs_found", lines, lines, lines)
+	logCmd := fmt.Sprintf("pm2 logs --nostream --lines %d 2>/dev/null || echo no_logs_found", lines)
 	result, err := l.RunCommandInContainer(ctx, containerID, logCmd)
 	if err != nil {
 		return "", err
