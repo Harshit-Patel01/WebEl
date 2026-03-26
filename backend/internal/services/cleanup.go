@@ -505,16 +505,11 @@ func (c *CleanupService) removeAllProxyDevices(ctx context.Context, containerNam
 	}
 }
 
-// cleanupOrphanContainersByName finds and removes LXD containers matching a project name pattern
-// that may not be tracked in the database
 func (c *CleanupService) cleanupOrphanContainersByName(ctx context.Context, projectName, projectID string) {
 	if projectName == "" {
 		return
 	}
 
-	// List all LXD containers matching the opendeploy-<projectName> pattern
-	// Container names are like: opendeploy-<projectName>-<timestamp>
-	// For full-stack: opendeploy-<projectName>-frontend-<timestamp>, opendeploy-<projectName>-backend-<timestamp>
 	result, err := c.runner.Run(ctx, exec.RunOpts{
 		JobType: "lxd_list",
 		Command: "lxc",
