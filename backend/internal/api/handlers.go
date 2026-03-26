@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -791,6 +792,7 @@ func (h *deployHandlers) triggerDeploy(w http.ResponseWriter, r *http.Request) {
 			ManualDomain      bool   `json:"manual_domain"`
 			EnableNginx       *bool  `json:"enable_nginx"`
 			AttachToProjectID string `json:"attach_to_project_id"`
+			HostPort          int    `json:"host_port"`
 		}
 		if err := parseBody(r, &body); err == nil {
 			opts = &services.DeployOptions{
@@ -798,6 +800,7 @@ func (h *deployHandlers) triggerDeploy(w http.ResponseWriter, r *http.Request) {
 				ZoneID:            body.ZoneID,
 				ManualDomain:      body.ManualDomain,
 				AttachToProjectID: body.AttachToProjectID,
+				HostPort:          body.HostPort,
 			}
 			// Default enable_nginx to true when domain is provided
 			if body.EnableNginx != nil {
@@ -1568,6 +1571,86 @@ func (h *containerHandlers) getContainerLogs(w http.ResponseWriter, r *http.Requ
 
 	respondOK(w, map[string]interface{}{
 		"logs": logs,
+	})
+}
+
+func (h *containerHandlers) updatePortMapping(w http.ResponseWriter, r *http.Request) {
+	containerID := chi.URLParam(r, "containerId")
+
+	container, err := h.db.GetContainer(containerID)
+	if err != nil || container == nil {
+		respondError(w, http.StatusNotFound, "container not found")
+		return
+	}
+
+	var body struct {
+		HostPort      int `json:"host_port"`
+		ContainerPort int `json:"container_port"`
+	}
+	if err := parseBody(r, &body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Parse existing port mappings to get current values
+	var mapping struct {
+		Host      string `json:"host"`
+		Container string `json:"container"`
+	}
+	if err := json.Unmarshal([]byte(container.PortMappings), &mapping); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to parse existing port mappings")
+		return
+	}
+	oldHostPort, _ := strconv.Atoi(mapping.Host)
+	oldContainerPort, _ := strconv.Atoi(mapping.Container)
+
+	// Use existing values if not provided
+	newHostPort := oldHostPort
+	newContainerPort := oldContainerPort
+	if body.HostPort > 0 {
+		newHostPort = body.HostPort
+	}
+	if body.ContainerPort > 0 {
+		newContainerPort = body.ContainerPort
+	}
+
+	if newHostPort < 1 || newHostPort > 65535 {
+		respondError(w, http.StatusBadRequest, "host_port must be between 1 and 65535")
+		return
+	}
+	if newContainerPort < 1 || newContainerPort > 65535 {
+		respondError(w, http.StatusBadRequest, "container_port must be between 1 and 65535")
+		return
+	}
+
+	if oldHostPort == newHostPort && oldContainerPort == newContainerPort {
+		respondOK(w, map[string]interface{}{
+			"message":        "port mapping unchanged",
+			"host_port":      newHostPort,
+			"container_port": newContainerPort,
+		})
+		return
+	}
+
+	// Update the LXD proxy device
+	if err := h.lxd.UpdatePortMapping(r.Context(), container.ContainerID, oldContainerPort, newContainerPort, newHostPort); err != nil {
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update port mapping: %s", err.Error()))
+		return
+	}
+
+	// Update the container record in the database
+	container.PortMappings = fmt.Sprintf(`{"host":"%d","container":"%d"}`, newHostPort, newContainerPort)
+	if err := h.db.UpdateContainer(container); err != nil {
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update container record: %s", err.Error()))
+		return
+	}
+
+	respondOK(w, map[string]interface{}{
+		"message":            "port mapping updated",
+		"host_port":          newHostPort,
+		"container_port":     newContainerPort,
+		"old_host_port":      oldHostPort,
+		"old_container_port": oldContainerPort,
 	})
 }
 
