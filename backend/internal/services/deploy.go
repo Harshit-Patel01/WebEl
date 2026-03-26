@@ -48,13 +48,13 @@ done
 `
 
 // frontendSetupScript sets up a container for frontend projects (React, Vue, Angular, etc).
-// Includes nginx and supervisor for process management.
+// Includes nginx and pm2 for process management.
 const frontendSetupScript = `set -e` + networkWait + `
 echo "SETUP: network ready"
 # Install base packages including Node.js
 apk update --no-cache
 echo "SETUP: apk update done"
-apk add --no-cache git bash ca-certificates supervisor nginx iproute2 nodejs npm
+apk add --no-cache git bash ca-certificates nginx iproute2 nodejs npm
 
 # Create nginx directories
 mkdir -p /etc/nginx/http.d /run/nginx
@@ -67,8 +67,11 @@ npm config set fetch-retries 5
 npm config set fetch-retry-mintimeout 20000
 npm config set fetch-retry-maxtimeout 120000
 
-mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
-echo "SETUP: supervisord started"
+# Install PM2 globally for process management
+npm install -g pm2
+pm2 startup openrc
+pm2 save
+echo "SETUP: PM2 installed"
 node --version && npm --version && echo "SETUP: complete"
 `
 
@@ -78,7 +81,7 @@ echo "SETUP: network ready"
 # Install base packages including Node.js
 apk update --no-cache
 echo "SETUP: apk update done"
-apk add --no-cache git bash ca-certificates supervisor iproute2 nodejs npm
+apk add --no-cache git bash ca-certificates iproute2 nodejs npm
 
 echo "SETUP: Node.js $(node --version) and npm $(npm --version) installed"
 
@@ -88,32 +91,42 @@ npm config set fetch-retries 5
 npm config set fetch-retry-mintimeout 20000
 npm config set fetch-retry-maxtimeout 120000
 
-mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
-echo "SETUP: supervisord started"
+# Install PM2 globally for process management
+npm install -g pm2
+pm2 startup openrc
+pm2 save
+echo "SETUP: PM2 installed"
 node --version && npm --version && echo "SETUP: complete"
 `
 
 // pythonSetupScript sets up a container for Python projects (Flask, Django, FastAPI).
 const pythonSetupScript = `set -e` + networkWait + `
 # Install Python packages
-apk update --no-cache && apk add --no-cache python3 py3-pip git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
+apk update --no-cache && apk add --no-cache python3 py3-pip git bash ca-certificates nodejs npm
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 python3 --version
 `
 
 // goSetupScript sets up a container for Go projects.
 const goSetupScript = `set -e` + networkWait + `
 # Install Go packages
-apk update --no-cache && apk add --no-cache go git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
+apk update --no-cache && apk add --no-cache go git bash ca-certificates nodejs npm
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 go version
 `
 
 // staticSetupScript sets up a container for static HTML/CSS/JS sites.
 const staticSetupScript = `set -e` + networkWait + `
 # Install static packages
-apk update --no-cache && apk add --no-cache git bash ca-certificates nginx supervisor
-mkdir -p /etc/nginx/http.d /run/nginx /var/log/supervisor /etc/supervisor.d && supervisord -c /etc/supervisord.conf
+apk update --no-cache && apk add --no-cache git bash ca-certificates nginx nodejs npm
+mkdir -p /etc/nginx/http.d /run/nginx
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 `
 
 type CommitInfo struct {
@@ -144,6 +157,7 @@ type DeployOptions struct {
 	ManualDomain      bool
 	EnableNginx       bool
 	AttachToProjectID string // If attaching this backend to an existing frontend
+	HostPort          int    // User-specified host port for the container proxy
 }
 
 func NewDeployService(runner *exec.Runner, db *state.DB, cfg config.DeployConfig, logger *zap.Logger) *DeployService {
@@ -646,31 +660,25 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		// Create a new context for the deployment (not tied to the HTTP request)
 		deployCtx := context.Background()
 
-		// Skip host-side cloning - will clone inside containers
 		logToDB("stdout", "Starting deployment...")
 		logToDB("stdout", fmt.Sprintf("Repository: %s", project.RepoURL))
 		logToDB("stdout", fmt.Sprintf("Branch: %s", project.Branch))
 
-		// Detect framework and working directory (needed for single-service deployments)
 		workingDir := project.WorkingDirectory
 		if workingDir == "" || workingDir == "." {
 			workingDir = "."
 		}
 		logToDB("stdout", fmt.Sprintf("Working directory: %s", workingDir))
 
-		// For LXD deployments, framework will be detected AFTER cloning inside container
-		// Set default values here, will be updated after clone
 		framework := FrameworkUnknown
 		deploy.Framework = string(framework)
 		deploy.IsBackend = false
 
-		// Determine project type - default to ProjectNode to ensure npm is available
 		projectType := ProjectType(project.ProjectType)
 		if projectType == "" {
-			projectType = ProjectNode // Default to Node.js which has npm
+			projectType = ProjectNode
 		}
 
-		// Check if this is a Full Stack deployment
 		isFullStack := project.ProjectType == "fullstack"
 
 		if isFullStack {
@@ -703,13 +711,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			backendInstallCmd := project.BackendInstallCommand
 			if backendInstallCmd == "" {
 				backendInstallCmd = GetDefaultInstallCommand(backendFramework)
-			}
-
-			startCmd := ""
-			if project.StartCommand != nil && *project.StartCommand != "" {
-				startCmd = *project.StartCommand
-			} else {
-				startCmd = GetDefaultStartCommand(backendFramework, backendContainerPort)
 			}
 
 			// ==================== FRONTEND CONTAINER ====================
@@ -774,36 +775,30 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				return
 			}
 
-			// Configure nginx for frontend via supervisor
-			logToDB("stdout", "Configuring nginx in frontend container...")
+			// Configure PM2 to serve frontend static files
+			logToDB("stdout", "Configuring PM2 to serve frontend static files...")
 			frontendOutputPath := fmt.Sprintf("/app/repo/%s/dist", frontendDir)
 			if project.OutputDir != "" {
 				frontendOutputPath = fmt.Sprintf("/app/repo/%s/%s", frontendDir, project.OutputDir)
 			}
 
-			nginxSetupCmd := fmt.Sprintf(
-				"mkdir -p /run/nginx /var/log/supervisor /etc/nginx/http.d && "+
-					"rm -f /etc/nginx/http.d/default.conf && "+
-					"printf 'server {\\n listen 80;\\n root %s;\\n index index.html;\\n location / { try_files $uri $uri/ /index.html; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
-					"nginx -t && "+
-					"printf '[program:nginx]\\ncommand=/usr/sbin/nginx -g \"daemon off;\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/nginx.log\\nstderr_logfile=/var/log/supervisor/nginx-err.log\\n' > /etc/supervisor.d/nginx.ini && "+
-					"rm -f /etc/supervisor.d/app.ini && "+
-					"supervisorctl reread && supervisorctl update && supervisorctl start nginx",
-				frontendOutputPath,
+			pm2ServeCmd := fmt.Sprintf(
+				"pm2 serve %s 80 --name %s --spa && pm2 save",
+				frontendOutputPath, project.Name+"-frontend",
 			)
 
-			nginxResult, nginxErr := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, nginxSetupCmd)
-			if nginxResult != nil {
-				for _, line := range nginxResult.Lines {
+			pm2Result, pm2Err := d.lxd.RunCommandInContainer(deployCtx, frontendContainerInfo.ID, pm2ServeCmd)
+			if pm2Result != nil {
+				for _, line := range pm2Result.Lines {
 					logToDB(line.Stream, line.Text)
 				}
 			}
-			if nginxErr != nil || (nginxResult != nil && nginxResult.ExitCode != 0) {
-				logToDB("stderr", "Failed to setup nginx via supervisor")
-				d.failDeploy(deploy, "Failed to setup nginx")
+			if pm2Err != nil || (pm2Result != nil && pm2Result.ExitCode != 0) {
+				logToDB("stderr", "Failed to setup PM2 serve for frontend")
+				d.failDeploy(deploy, "Failed to setup frontend service")
 				return
 			}
-			logToDB("stdout", "Frontend container ready (nginx serving build output)")
+			logToDB("stdout", "Frontend container ready (PM2 serving build output)")
 
 			// Configure frontend container to auto-start on boot
 			d.runner.Run(deployCtx, exec.RunOpts{
@@ -826,14 +821,21 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			logToDB("stdout", fmt.Sprintf("Backend container created: %s (ID: %s)", backendContainerInfo.Name, backendContainerInfo.ID))
 
-			// Allocate backend port
-			backendHostPort, backendPortErr := d.portAllocator.AllocatePort("backend")
-			if backendPortErr != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to allocate backend port: %s", backendPortErr.Error()))
-				d.failDeploy(deploy, backendPortErr.Error())
-				return
+			// Allocate backend port (use user-specified if provided)
+			var backendHostPort int
+			if opts != nil && opts.HostPort > 0 {
+				backendHostPort = opts.HostPort
+				logToDB("stdout", fmt.Sprintf("Using user-specified backend host port: %d", backendHostPort))
+			} else {
+				var backendPortErr error
+				backendHostPort, backendPortErr = d.portAllocator.AllocatePort("backend")
+				if backendPortErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to allocate backend port: %s", backendPortErr.Error()))
+					d.failDeploy(deploy, backendPortErr.Error())
+					return
+				}
+				logToDB("stdout", fmt.Sprintf("Allocated backend host port: %d", backendHostPort))
 			}
-			logToDB("stdout", fmt.Sprintf("Allocated backend host port: %d", backendHostPort))
 
 			// Setup backend port proxy (container port -> host port)
 			if err := d.lxd.SetupPortProxy(deployCtx, backendContainerInfo.ID, backendContainerPort, backendHostPort); err != nil {
@@ -885,30 +887,24 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, writeEnvCmd)
 			}
 
-			// Ensure startCmd has a fallback - if empty, use npm start
-			if startCmd == "" {
-				startCmd = "npm start"
-			}
-
-			// Start backend service via supervisor
-			logToDB("stdout", "Configuring backend service with supervisor...")
-			supervisorConfig := fmt.Sprintf(
-				"printf '[program:app]\\ndirectory=%s\\ncommand=/bin/sh -c \"%s\"\\nautostart=true\\nautorestart=true\\nstdout_logfile=/var/log/supervisor/app.log\\nstderr_logfile=/var/log/supervisor/app-err.log\\n' > /etc/supervisor.d/app.ini && "+
-					"supervisorctl reread && supervisorctl update && supervisorctl start app",
-				backendWorkDir, startCmd,
+			// Start backend service via PM2 using npm start
+			logToDB("stdout", "Configuring backend service with PM2...")
+			pm2StartCmd := fmt.Sprintf(
+				"cd %s && pm2 start npm --name %s -- start && pm2 save",
+				backendWorkDir, project.Name+"-backend",
 			)
-			svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, supervisorConfig)
+			svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, pm2StartCmd)
 			if svcResult != nil {
 				for _, line := range svcResult.Lines {
 					logToDB(line.Stream, line.Text)
 				}
 			}
 			if svcErr != nil || (svcResult != nil && svcResult.ExitCode != 0) {
-				logToDB("stderr", "Failed to start backend via supervisor")
+				logToDB("stderr", "Failed to start backend via PM2")
 				d.failDeploy(deploy, "Failed to start backend service")
 				return
 			}
-			logToDB("stdout", "Backend service started (managed by supervisor)")
+			logToDB("stdout", "Backend service started (managed by PM2)")
 
 			// Save both containers to database
 			frontendContainer := &state.Container{
@@ -1106,13 +1102,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			)
 			logToDB("stdout", fmt.Sprintf("Detected framework: %s", framework))
 
-			// All dependencies (nodejs, npm, git, bash, ca-certificates, nginx, supervisor)
-			// are already installed during container creation via setup scripts.
-
-			// Node.js is pre-installed during container creation via setup script
-
-			// Python and Go are already installed via setup scripts during container creation
-
 			d.logger.Info("detected framework",
 				zap.String("projectId", project.ID),
 				zap.String("framework", string(framework)),
@@ -1144,7 +1133,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				}
 			}
 
-			containerPort = 80 // Default for frontend
+			containerPort = 80
 			if deploy.IsBackend {
 				containerPort = GetDefaultPort(framework)
 				if project.LocalPort > 0 {
@@ -1152,17 +1141,21 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				}
 			}
 
-			// STEP 5: Allocate host port for the container
-			hostPort, portErr := d.portAllocator.AllocatePort(string(projectType))
-			if portErr != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to allocate host port: %s", portErr.Error()))
-				d.failDeploy(deploy, portErr.Error())
-				return
+			// STEP 5: Allocate host port for the container (use user-specified if provided)
+			var hostPort int
+			if opts != nil && opts.HostPort > 0 {
+				hostPort = opts.HostPort
+				logToDB("stdout", fmt.Sprintf("Using user-specified host port: %d", hostPort))
+			} else {
+				var portErr error
+				hostPort, portErr = d.portAllocator.AllocatePort(string(projectType))
+				if portErr != nil {
+					logToDB("stderr", fmt.Sprintf("Failed to allocate host port: %s", portErr.Error()))
+					d.failDeploy(deploy, portErr.Error())
+					return
+				}
+				logToDB("stdout", fmt.Sprintf("Allocated host port: %d", hostPort))
 			}
-			containerInfo.HostPort = hostPort
-			containerInfo.ContainerPort = containerPort
-
-			logToDB("stdout", fmt.Sprintf("Allocated host port: %d", hostPort))
 
 			// Setup port proxy from host to container
 			d.broadcastPhase(deployID, "service", "Setting up port proxy...")
@@ -1175,7 +1168,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			logToDB("stdout", fmt.Sprintf("Port proxy configured: %d → %d", hostPort, containerInfo.ContainerPort))
 
 			// STEP 6: Install project dependencies
-			// Only run npm install for Node-based frameworks
 			isNodeFramework := framework == FrameworkNode || framework == FrameworkNextJS ||
 				framework == FrameworkNuxtJS || framework == FrameworkRemix || framework == FrameworkNestJS ||
 				framework == FrameworkExpress || framework == FrameworkFastify || framework == FrameworkReact ||
@@ -1412,71 +1404,38 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 			logToDB("stdout", "Container configured to auto-start on boot")
 
-			// STEP 8: Start service or configure nginx
+			// STEP 8: Start service or configure PM2
 			if deploy.IsBackend {
 				d.broadcastPhase(deployID, "service", "Starting service...")
-				logToDB("stdout", "Configuring backend service with supervisor...")
+				logToDB("stdout", "Configuring backend service with PM2...")
 
 				// Ensure startCmd has a fallback - if empty, use npm start
 				if startCmd == "" {
-					startCmd = "npm start"
+					startCmd = "start"
 				}
 
-				// Create proper supervisor config for backend service
-				// This ensures the service persists across container restarts
-				supervisorConfig := fmt.Sprintf(
-					"mkdir -p /var/log/supervisor && "+
-						"printf '[program:app]\\n"+
-						"directory=%s\\n"+
-						"command=/bin/sh -c \"%s\"\\n"+
-						"autostart=true\\n"+
-						"autorestart=true\\n"+
-						"startsecs=3\\n"+
-						"stdout_logfile=/var/log/supervisor/app.log\\n"+
-						"stdout_logfile_maxbytes=10MB\\n"+
-						"stderr_logfile=/var/log/supervisor/app-err.log\\n"+
-						"stderr_logfile_maxbytes=10MB\\n"+
-						"environment=PORT=\"%d\",NODE_ENV=\"production\"\\n' > /etc/supervisor.d/app.ini && "+
-						"supervisorctl reread && supervisorctl update && supervisorctl start app",
-					workDir, startCmd, containerPort,
+				// Start the backend service via PM2
+				// This ensures the service persists across container restarts via pm2 save/resurrect
+				pm2StartCmd := fmt.Sprintf(
+					"cd %s && pm2 start npm --name %s -- %s && pm2 save",
+					workDir, project.Name, startCmd,
 				)
-				svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, supervisorConfig)
+				svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, pm2StartCmd)
 				if svcResult != nil {
 					for _, line := range svcResult.Lines {
 						logToDB(line.Stream, line.Text)
 					}
 				}
 				if svcErr != nil || (svcResult != nil && svcResult.ExitCode != 0) {
-					logToDB("stderr", "Failed to start backend via supervisor")
+					logToDB("stderr", "Failed to start backend via PM2")
 					d.failDeploy(deploy, "Failed to start service")
 					return
 				}
-				logToDB("stdout", "Backend service started (managed by supervisor)")
+				logToDB("stdout", "Backend service started (managed by PM2)")
 			} else {
-				// For frontend, configure nginx via supervisor
-				d.broadcastPhase(deployID, "service", "Configuring nginx...")
-				logToDB("stdout", "Configuring nginx in container...")
-
-				// CRITICAL: Check if nginx is installed, install if missing
-				nginxCheckResult, _ := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, "which nginx 2>/dev/null || echo 'not_found'")
-				if nginxCheckResult != nil && len(nginxCheckResult.Lines) > 0 {
-					if strings.Contains(nginxCheckResult.Lines[0].Text, "not_found") {
-						logToDB("stdout", "nginx not found in container, installing nginx...")
-						installNginxCmd := "apk add --no-cache nginx"
-						installResult, installErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, installNginxCmd)
-						if installResult != nil {
-							for _, line := range installResult.Lines {
-								logToDB(line.Stream, line.Text)
-							}
-						}
-						if installErr != nil || (installResult != nil && installResult.ExitCode != 0) {
-							logToDB("stderr", "Failed to install nginx in container")
-							d.failDeploy(deploy, "Failed to install nginx")
-							return
-						}
-						logToDB("stdout", "nginx installed successfully")
-					}
-				}
+				// For frontend, serve static files via PM2
+				d.broadcastPhase(deployID, "service", "Configuring PM2 serve...")
+				logToDB("stdout", "Configuring PM2 to serve frontend static files...")
 
 				// Determine output directory
 				outputDir := "dist"
@@ -1493,41 +1452,26 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 					}
 				}
 
-				// Create nginx config and supervisor entry
-				// Simple nginx config that just serves static files on port 80
-				nginxSetupCmd := fmt.Sprintf(
-					"mkdir -p /run/nginx /var/log/supervisor /etc/nginx/http.d && "+
-						"rm -f /etc/nginx/http.d/default.conf && "+
-						"printf 'server {\\n listen 80 default_server;\\n root %s/%s;\\n index index.html;\\n "+
-						"location / { try_files $uri $uri/ /index.html; }\\n "+
-						"location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ { expires 30d; add_header Cache-Control \"public, immutable\"; }\\n}\\n' > /etc/nginx/http.d/opendeploy.conf && "+
-						"nginx -t && "+
-						"printf '[program:nginx]\\n"+
-						"command=/usr/sbin/nginx -g \"daemon off;\"\\n"+
-						"autostart=true\\n"+
-						"autorestart=true\\n"+
-						"startsecs=3\\n"+
-						"stdout_logfile=/var/log/supervisor/nginx.log\\n"+
-						"stdout_logfile_maxbytes=10MB\\n"+
-						"stderr_logfile=/var/log/supervisor/nginx-err.log\\n"+
-						"stderr_logfile_maxbytes=10MB\\n' > /etc/supervisor.d/nginx.ini && "+
-						"rm -f /etc/supervisor.d/app.ini && "+
-						"supervisorctl reread && supervisorctl update && supervisorctl start nginx",
-					workDir, outputDir,
+				// Serve the static files via PM2 on port 80
+				servePath := fmt.Sprintf("%s/%s", workDir, outputDir)
+				pm2ServeCmd := fmt.Sprintf(
+
+					"pm2 serve %s 80 --name %s --spa && pm2 save",
+					servePath, project.Name,
 				)
 
-				nginxResult, nginxErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, nginxSetupCmd)
-				if nginxResult != nil {
-					for _, line := range nginxResult.Lines {
+				pm2Result, pm2Err := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, pm2ServeCmd)
+				if pm2Result != nil {
+					for _, line := range pm2Result.Lines {
 						logToDB(line.Stream, line.Text)
 					}
 				}
-				if nginxErr != nil || (nginxResult != nil && nginxResult.ExitCode != 0) {
-					logToDB("stderr", "Failed to setup nginx via supervisor")
-					d.failDeploy(deploy, "Failed to setup nginx")
+				if pm2Err != nil || (pm2Result != nil && pm2Result.ExitCode != 0) {
+					logToDB("stderr", "Failed to setup PM2 serve for frontend")
+					d.failDeploy(deploy, "Failed to setup frontend service")
 					return
 				}
-				logToDB("stdout", "Nginx configured and started (managed by supervisor)")
+				logToDB("stdout", "Frontend static files being served by PM2")
 			}
 
 			// Save container info to database
