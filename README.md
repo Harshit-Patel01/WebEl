@@ -2,6 +2,15 @@
 
 OpenDeploy is a beautiful, brutalist-inspired Next.js + Go dashboard designed to turn any linux device into a self-hosted platform-as-a-service (PaaS). No terminal or SSH needed—just plug it in, hit the dashboard, and deploy your apps directly from GitHub via Cloudflare Tunnels.
 
+## UI Screenshots
+
+| | |
+|:---:|:---:|
+| ![Dashboard](assets/dashboard.png) | ![Deployments](assets/deployments.png) |
+| **Dashboard** | **Deployments** |
+| ![Settings](assets/settings.png) | ![WiFi Setup](assets/wifi-setup.png) |
+| **Settings** | **WiFi Setup** |
+
 ### Frontend
 
 ```bash
