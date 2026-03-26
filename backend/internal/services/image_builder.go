@@ -145,52 +145,65 @@ EOF
 	case ImageFrontend:
 		return baseScript + `
 apk update --no-cache
-apk add --no-cache git bash ca-certificates supervisor nginx iproute2 nodejs npm
+apk add --no-cache git bash ca-certificates nginx iproute2 nodejs npm
 mkdir -p /etc/nginx/http.d /run/nginx
 npm config set registry https://registry.npmjs.org/
 npm config set fetch-retries 5
 npm config set fetch-retry-mintimeout 20000
 npm config set fetch-retry-maxtimeout 120000
-mkdir -p /var/log/supervisor /etc/supervisor.d
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 node --version && npm --version && echo "Frontend image ready"
 `
 	case ImageNodeJS:
 		return baseScript + `
 apk update --no-cache
-apk add --no-cache git bash ca-certificates supervisor iproute2 nodejs npm
+apk add --no-cache git bash ca-certificates iproute2 nodejs npm
 npm config set registry https://registry.npmjs.org/
 npm config set fetch-retries 5
 npm config set fetch-retry-mintimeout 20000
 npm config set fetch-retry-maxtimeout 120000
-mkdir -p /var/log/supervisor /etc/supervisor.d
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 node --version && npm --version && echo "Node.js image ready"
 `
 	case ImagePython:
 		return baseScript + `
 apk update --no-cache
-apk add --no-cache python3 py3-pip git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
+apk add --no-cache python3 py3-pip git bash ca-certificates nodejs npm
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 python3 --version && echo "Python image ready"
 `
 	case ImageGo:
 		return baseScript + `
 apk update --no-cache
-apk add --no-cache go git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
+apk add --no-cache go git bash ca-certificates nodejs npm
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 go version && echo "Go image ready"
 `
 	case ImageStatic:
 		return baseScript + `
 apk update --no-cache
-apk add --no-cache git bash ca-certificates nginx supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
+apk add --no-cache git bash ca-certificates nginx nodejs npm
+mkdir -p /etc/nginx/http.d /run/nginx
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 echo "Static image ready"
 `
 	default:
 		return baseScript + `
 apk update --no-cache
-apk add --no-cache git bash ca-certificates supervisor
-mkdir -p /var/log/supervisor /etc/supervisor.d
+apk add --no-cache git bash ca-certificates nodejs npm
+npm install -g pm2
+pm2 startup openrc
+pm2 save
 echo "Generic image ready"
 `
 	}
