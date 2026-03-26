@@ -713,6 +713,13 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				backendInstallCmd = GetDefaultInstallCommand(backendFramework)
 			}
 
+			startCmd := ""
+			if project.StartCommand != nil && *project.StartCommand != "" {
+				startCmd = *project.StartCommand
+			} else {
+				startCmd = GetDefaultStartCommand(backendFramework, backendContainerPort)
+			}
+
 			// ==================== FRONTEND CONTAINER ====================
 			d.broadcastPhase(deployID, "build", "Creating frontend container...")
 			logToDB("stdout", "Creating LXD container for frontend (nodejs + nginx)...")
@@ -887,11 +894,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, writeEnvCmd)
 			}
 
-			// Start backend service via PM2 using npm start
+			// Start backend service via PM2 using the user-provided start script
 			logToDB("stdout", "Configuring backend service with PM2...")
 			pm2StartCmd := fmt.Sprintf(
-				"cd %s && pm2 start npm --name %s -- start && pm2 save",
-				backendWorkDir, project.Name+"-backend",
+				"cd %s && pm2 start npm --name %s -- %s && pm2 save",
+				backendWorkDir, project.Name+"-backend", GetNPMScriptName(startCmd),
 			)
 			svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, backendContainerInfo.ID, pm2StartCmd)
 			if svcResult != nil {
@@ -1418,7 +1425,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				// This ensures the service persists across container restarts via pm2 save/resurrect
 				pm2StartCmd := fmt.Sprintf(
 					"cd %s && pm2 start npm --name %s -- %s && pm2 save",
-					workDir, project.Name, startCmd,
+					workDir, project.Name, GetNPMScriptName(startCmd),
 				)
 				svcResult, svcErr := d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, pm2StartCmd)
 				if svcResult != nil {

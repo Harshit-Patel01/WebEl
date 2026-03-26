@@ -22,7 +22,7 @@ export default function DeployPage() {
   const [branch, setBranch] = useState('main')
   const [buildCmd, setBuildCmd] = useState('npm run build')
   const [installCmd, setInstallCmd] = useState('')
-  const [startCmd, setStartCmd] = useState('')
+  const [startCmd, setStartCmd] = useState('start')
   const [outputDir, setOutputDir] = useState('')
   const [workingDir, setWorkingDir] = useState('')
   const [frontendWorkingDir, setFrontendWorkingDir] = useState('')
@@ -894,10 +894,10 @@ export default function DeployPage() {
                             onChange={e => setStartCmd(e.target.value)}
                             disabled={deploying}
                             className="w-full px-4 py-3 bg-bg-primary border border-border-dark  font-mono text-small text-text-primary disabled:opacity-50 focus:border-accent-lime focus:outline-none transition-colors"
-                            placeholder="npm start"
+                            placeholder="start"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Full start command (e.g. "npm start", "node server.js", "python main.py")
+                            npm script name from package.json (e.g. "start", "run dev", "run start:prod"). Defaults to "start".
                           </p>
                         </div>
                         <div>
