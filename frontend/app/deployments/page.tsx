@@ -90,6 +90,10 @@ export default function DeploymentsPage() {
   const [creatingTunnel, setCreatingTunnel] = useState(false)
   const [hasTunnelSetup, setHasTunnelSetup] = useState(false)
   const [checkingTunnel, setCheckingTunnel] = useState(true)
+  const [editingPortContainerId, setEditingPortContainerId] = useState<string | null>(null)
+  const [newPortValue, setNewPortValue] = useState('')
+  const [newContainerPortValue, setNewContainerPortValue] = useState('')
+  const [updatingPort, setUpdatingPort] = useState(false)
 
   useEffect(() => {
     loadProjects()
@@ -192,6 +196,57 @@ export default function DeploymentsPage() {
     if (!confirm('Remove this container?')) return
     await fetch(`/api/v1/projects/${projectId}/containers`, { method: 'DELETE', credentials: 'include' })
     loadContainers(projectId)
+  }
+
+  const handleUpdatePort = async (containerId: string, projectId: string) => {
+    const body: Record<string, number> = {}
+
+    if (newPortValue) {
+      const port = parseInt(newPortValue)
+      if (port < 1 || port > 65535) {
+        alert('Host port must be between 1 and 65535')
+        return
+      }
+      body.host_port = port
+    }
+
+    if (newContainerPortValue) {
+      const port = parseInt(newContainerPortValue)
+      if (port < 1 || port > 65535) {
+        alert('Container port must be between 1 and 65535')
+        return
+      }
+      body.container_port = port
+    }
+
+    if (Object.keys(body).length === 0) {
+      setEditingPortContainerId(null)
+      return
+    }
+
+    setUpdatingPort(true)
+    try {
+      const res = await fetch(`/api/v1/containers/${containerId}/port`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to update port')
+      }
+
+      setEditingPortContainerId(null)
+      setNewPortValue('')
+      setNewContainerPortValue('')
+      loadContainers(projectId)
+    } catch (err: any) {
+      alert('Failed to update port: ' + err.message)
+    } finally {
+      setUpdatingPort(false)
+    }
   }
 
   const handleViewContainerLogs = async (containerId: string) => {
@@ -676,14 +731,65 @@ export default function DeploymentsPage() {
                                 {container.port_mappings && (() => {
                                   try {
                                     const mapping = JSON.parse(container.port_mappings)
+                                    const isEditing = editingPortContainerId === container.id
                                     return (
                                       <div className="flex items-center gap-2 text-[10px] font-mono">
                                         <span className="text-text-secondary">Port:</span>
-                                        <span className="bg-bg-primary px-2 py-1 border border-border-dark">
-                                          <span className="text-accent-lime">{mapping.host}</span>
-                                          <span className="text-text-secondary mx-1">→</span>
-                                          <span className="text-cyan-400">{mapping.container}</span>
-                                        </span>
+                                        {isEditing ? (
+                                          <div className="flex items-center gap-1">
+                                            <input
+                                              type="number"
+                                              value={newPortValue}
+                                              onChange={e => setNewPortValue(e.target.value)}
+                                              placeholder={mapping.host}
+                                              className="w-16 px-1.5 py-1 bg-bg-primary border border-accent-lime font-mono text-[10px] text-text-primary focus:outline-none"
+                                              min="1"
+                                              max="65535"
+                                              autoFocus
+                                            />
+                                            <span className="text-text-secondary">→</span>
+                                            <input
+                                              type="number"
+                                              value={newContainerPortValue}
+                                              onChange={e => setNewContainerPortValue(e.target.value)}
+                                              placeholder={mapping.container}
+                                              className="w-16 px-1.5 py-1 bg-bg-primary border border-accent-lime font-mono text-[10px] text-text-primary focus:outline-none"
+                                              min="1"
+                                              max="65535"
+                                            />
+                                            <button
+                                              onClick={() => handleUpdatePort(container.id, project.id)}
+                                              disabled={updatingPort}
+                                              className="px-1.5 py-0.5 bg-accent-lime text-text-dark font-mono text-[9px] font-bold hover:bg-accent-lime-muted disabled:opacity-50"
+                                            >
+                                              {updatingPort ? '...' : 'Save'}
+                                            </button>
+                                            <button
+                                              onClick={() => { setEditingPortContainerId(null); setNewPortValue(''); setNewContainerPortValue('') }}
+                                              disabled={updatingPort}
+                                              className="px-1.5 py-0.5 bg-bg-primary text-text-secondary border border-border-dark font-mono text-[9px] hover:text-text-primary disabled:opacity-50"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <div className="flex items-center gap-1">
+                                            <span className="bg-bg-primary px-2 py-1 border border-border-dark">
+                                              <span className="text-accent-lime">{mapping.host}</span>
+                                              <span className="text-text-secondary mx-1">→</span>
+                                              <span className="text-cyan-400">{mapping.container}</span>
+                                            </span>
+                                            {container.status === 'running' && (
+                                              <button
+                                                onClick={() => { setEditingPortContainerId(container.id); setNewPortValue(mapping.host); setNewContainerPortValue(mapping.container) }}
+                                                className="px-1.5 py-1 bg-bg-primary text-text-secondary border border-border-dark font-mono text-[9px] hover:text-accent-lime hover:border-accent-lime transition-colors"
+                                                title="Change port mapping"
+                                              >
+                                                Change
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
                                       </div>
                                     )
                                   } catch {
