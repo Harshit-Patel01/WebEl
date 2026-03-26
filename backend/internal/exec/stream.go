@@ -1,8 +1,5 @@
 package exec
 
-// Stream provides helper types for streaming exec output over WebSocket.
-
-// WSMessage represents a WebSocket message sent to the client.
 type WSMessage struct {
 	Type    string      `json:"type"`
 	JobID   string      `json:"jobId,omitempty"`
@@ -12,7 +9,6 @@ type WSMessage struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-// ErrorEvent is emitted when a known error pattern is detected.
 type ErrorEvent struct {
 	Type    string `json:"type"`
 	Code    string `json:"code"`
