@@ -203,6 +203,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Delete("/projects/{id}/containers", containerH.removeContainer)
 			r.Get("/containers/{containerId}/logs", containerH.getContainerLogs)
 			r.Get("/containers/{containerId}/status", containerH.getContainerStatus)
+			r.Put("/containers/{containerId}/port", containerH.updatePortMapping)
 			// Individual container control
 			r.Post("/containers/{containerId}/stop", containerH.stopContainerByID)
 			r.Post("/containers/{containerId}/restart", containerH.restartContainerByID)
