@@ -37,13 +37,13 @@ cd frontend
 npm run build
 ```
 
-1. **Move Frontend to Backend Static Directory:**
+2. **Move Frontend to Backend Static Directory:**
 
 ```bash
 cp -r build/* ../backend/static/frontend/
 ```
 
-1. **Cross-Compile Go for (Linux ARM64):**
+3. **Cross-Compile Go for (Linux ARM64):**
 
 ```bash
 cd ../backend
