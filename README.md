@@ -39,9 +39,12 @@ npm run build
 
 2. **Move Frontend to Backend Static Directory:**
 
-```bash
-cp -r build/* ../backend/static/frontend/
-```
+The frontend is configured in `/frontend/next.config.js` with:
+
+- `output: 'export'`
+- `distDir: '../backend/static/frontend'`
+
+So `npm run build` already writes the static frontend files directly to `backend/static/frontend/` and no separate `cp` step is required.
 
 3. **Cross-Compile Go for (Linux ARM64):**
 
