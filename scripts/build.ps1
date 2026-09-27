@@ -58,6 +58,7 @@ switch ($Target) {
         Build-Binary "linux" "386" "" "linux-386"
     }
     "build-all" {
+        Build-Frontend
         Build-Binary "linux" "arm64" "" "linux-arm64"
         Build-Binary "linux" "amd64" "" "linux-amd64"
         Build-Binary "linux" "arm" "7" "linux-armv7"
