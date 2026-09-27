@@ -1,14 +1,14 @@
 !/usr/bin/env bash
 # OpenDeploy one-command host bootstrap for Raspberry Pi / Debian / Ubuntu.
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Harshit-Patel01/WebEl/main/scripts/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Harshit-Patel01/WebEl/feature/scripts/install.sh | sudo bash
 #   sudo ./scripts/install.sh
 #   sudo ./scripts/install.sh --binary /path/to/opendeploy-linux-arm64
 #   sudo ./scripts/install.sh --from-source
 set -euo pipefail
 
 OPENDEPLOY_VERSION="${OPENDEPLOY_VERSION:-latest}"
-OPENDEPLOY_REPO="${OPENDEPLOY_REPO:-}"
+OPENDEPLOY_REPO="${OPENDEPLOY_REPO:-Harshit-Patel01/WebEl}"
 INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
 CONFIG_DIR="/etc/opendeploy"
 DATA_DIR="/var/lib/opendeploy"
