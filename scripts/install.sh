@@ -412,6 +412,75 @@ enable_service() {
   systemctl restart opendeploy
 }
 
+write_nginx_config() {
+  local _hn
+  _hn="$(hostname 2>/dev/null | tr -d '[:space:]')"
+
+  local _server_names="webel.local"
+  if [[ -n "${_hn}" ]]; then
+    _server_names="webel.local ${_hn}.local"
+  fi
+
+  local nginx_conf="/etc/nginx/sites-available/opendeploy"
+
+  cat > "${nginx_conf}" <<NGINX
+server {
+    listen 80;
+    server_name ${_server_names};
+
+    access_log  /var/log/nginx/opendeploy-access.log;
+    error_log   /var/log/nginx/opendeploy-error.log;
+
+    location / {
+        proxy_pass            http://127.0.0.1:3000;
+        proxy_http_version    1.1;
+        proxy_set_header      Upgrade           \$http_upgrade;
+        proxy_set_header      Connection        "upgrade";
+        proxy_set_header      Host              \$host;
+        proxy_set_header      X-Real-IP         \$remote_addr;
+        proxy_set_header      X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto \$scheme;
+        proxy_read_timeout    60s;
+        proxy_send_timeout    60s;
+        proxy_cache_bypass    \$http_upgrade;
+    }
+}
+
+server {
+    listen 80 default_server;
+    server_name ~^\d{1,3}(\.\d{1,3}){3}\$ "";
+
+    access_log  /var/log/nginx/opendeploy-access.log;
+    error_log   /var/log/nginx/opendeploy-error.log;
+
+    location / {
+        proxy_pass            http://127.0.0.1:3000;
+        proxy_http_version    1.1;
+        proxy_set_header      Upgrade           \$http_upgrade;
+        proxy_set_header      Connection        "upgrade";
+        proxy_set_header      Host              \$host;
+        proxy_set_header      X-Real-IP         \$remote_addr;
+        proxy_set_header      X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto \$scheme;
+        proxy_read_timeout    60s;
+        proxy_send_timeout    60s;
+        proxy_cache_bypass    \$http_upgrade;
+    }
+}
+NGINX
+
+  chmod 644 "${nginx_conf}"
+  rm -f /etc/nginx/sites-enabled/default
+  ln -sf "${nginx_conf}" /etc/nginx/sites-enabled/opendeploy
+
+  if nginx -t 2>/dev/null; then
+    systemctl reload nginx 2>/dev/null || true
+    log "nginx: port 80 → 3000 (${_server_names} + direct IP)"
+  else
+    warn "nginx config test failed; check ${nginx_conf}"
+  fi
+}
+
 health_check() {
   echo
   log "=== Dependency / service health ==="
@@ -479,9 +548,11 @@ health_check() {
 
   echo
   if systemctl is-active --quiet opendeploy 2>/dev/null; then
+    local _ip
+    _ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
     log "OpenDeploy is running."
-    log "Dashboard: http://$(hostname).local:3000  or  http://<device-ip>:3000"
-    log "Hotspot SSID (when AP mode): webel / webel123 â†’ http://webel.local:3000"
+    log "Dashboard: http://webel.local  or  http://$(hostname).local  or  http://${_ip}"
+    log "Hotspot SSID (when AP mode): webel / webel123 â†’ http://webel.local"
   else
     warn "opendeploy service is not active. Check: journalctl -u opendeploy -e"
   fi
@@ -507,6 +578,7 @@ main() {
   bin="$(resolve_binary "${arch}")"
   install_files "${bin}"
   enable_service
+  write_nginx_config
   health_check
 }
 
