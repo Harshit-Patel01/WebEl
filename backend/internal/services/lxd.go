@@ -16,6 +16,13 @@ import (
 // FrameworkType represents the type of framework being deployed
 type FrameworkType string
 
+// Container resource limits. A fixed memory cap keeps a heavy `next build`
+// from OOM-killing the host; targets are Pi-class devices where RAM is scarce.
+const (
+	ContainerMemoryLimit = "512MB"
+	ContainerCPULimit    = "2"
+)
+
 const (
 	FrameworkUnknown FrameworkType = "unknown"
 	FrameworkNode    FrameworkType = "node"
@@ -370,6 +377,24 @@ func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context
 		Args:    []string{"config", "set", containerID, "limits.network.priority", "10"},
 		Timeout: 10 * time.Second,
 	})
+
+	// Cap memory so a heavy build (e.g. next build on a 2GB Pi) cannot OOM the host.
+	limits := [][]string{
+		{"limits.memory", ContainerMemoryLimit},
+		{"limits.cpu", ContainerCPULimit},
+		// Survive host reboot and app crash, but cap retries to avoid a hot crash loop.
+		{"limits.autostart", "true"},
+		{"limits.restart.policy", "always"},
+		{"limits.restart.maximum", "3"},
+	}
+	for _, kv := range limits {
+		l.runner.Run(ctx, exec.RunOpts{
+			JobType: "lxd_config",
+			Command: "lxc",
+			Args:    []string{"config", "set", containerID, kv[0], kv[1]},
+			Timeout: 10 * time.Second,
+		})
+	}
 
 	// Start the container
 	l.logger.Info("starting container", zap.String("containerId", containerID))

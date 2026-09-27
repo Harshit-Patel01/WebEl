@@ -65,6 +65,19 @@ func DetectFramework(workDir string) (*FrameworkInfo, error) {
 	return nil, nil
 }
 
+// SupportedFrontendFrameworks is the allowlist of frameworks this build
+// pipeline knows how to build and serve. Detection matching anything outside
+// this set is rejected before deploy proceeds.
+var SupportedFrontendFrameworks = map[FrameworkType]bool{
+	FrameworkNextJS: true,
+	FrameworkReact:  true,
+	FrameworkVite:   true, // Vite-based React SPAs export a static out/ dir
+}
+
+func IsSupportedFrontendFramework(f FrameworkType) bool {
+	return SupportedFrontendFrameworks[f]
+}
+
 // DetectLanguage acts as a fallback for non-Node projects
 func DetectLanguage(workDir string) FrameworkType {
 	checks := []struct {

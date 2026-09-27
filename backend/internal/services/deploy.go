@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -206,394 +205,26 @@ func (d *DeployService) broadcastPhase(deployID, phase, message string) {
 	}
 }
 
-func (d *DeployService) Clone(ctx context.Context, repoURL, branch, projectID, jobID string) (*exec.ExecResult, error) {
-	if !isValidRepoURL(repoURL) {
-		return nil, fmt.Errorf("invalid repository URL")
+// NormalizeBuildCommand accepts either a bare npm script name or a full
+// command line and returns the full command.
+//
+//	"build"          -> "npm run build"
+//	"npm run build"  -> "npm run build"
+//	"yarn build"     -> "yarn build"
+//
+// The UI placeholder suggests the full form, so users naturally type it;
+// previously that produced "npm run npm run build" and failed.
+func NormalizeBuildCommand(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return "npm run build"
 	}
-
-	targetDir := filepath.Join("/tmp", projectID)
-
-	// Remove existing directory if present
-	os.RemoveAll(targetDir)
-
-	// Derive the deploy-level broadcast topic from the job ID
-	broadcastID := strings.TrimSuffix(jobID, "-clone")
-
-	result, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID,
-		BroadcastJobID: broadcastID,
-		JobType:        "git_clone",
-		Command:        d.cfg.GitBinary,
-		Args:           []string{"clone", "--branch", branch, "--depth", "1", "--progress", repoURL, targetDir},
-		MergeEnv:       true,
-		Timeout:        d.cfg.BuildTimeout,
-	})
-	return result, err
-}
-
-func (d *DeployService) Pull(ctx context.Context, projectID, branch, jobID string) (*exec.ExecResult, error) {
-	targetDir := filepath.Join("/tmp", projectID)
-
-	// Derive the deploy-level broadcast topic from the job ID
-	broadcastID := strings.TrimSuffix(jobID, "-pull")
-
-	result, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID,
-		BroadcastJobID: broadcastID,
-		JobType:        "git_pull",
-		Command:        d.cfg.GitBinary,
-		Args:           []string{"-C", targetDir, "pull", "origin", branch},
-		MergeEnv:       true,
-		Timeout:        5 * time.Minute,
-	})
-	return result, err
-}
-
-func (d *DeployService) GetLatestCommit(projectID string) (*CommitInfo, error) {
-	targetDir := filepath.Join("/tmp", projectID)
-
-	result, err := d.runner.Run(context.Background(), exec.RunOpts{
-		JobType:  "git_log",
-		Command:  d.cfg.GitBinary,
-		Args:     []string{"-C", targetDir, "log", "-1", "--format=%H|%s|%an|%ae|%at"},
-		MergeEnv: true,
-		Timeout:  10 * time.Second,
-	})
-	if err != nil || !result.Success {
-		return nil, fmt.Errorf("failed to get commit info")
+	// Already a full command (contains a space or a known runner) — use as-is.
+	if strings.ContainsAny(cmd, " \t") {
+		return cmd
 	}
-
-	for _, line := range result.Lines {
-		if line.Stream == "stdout" && strings.Contains(line.Text, "|") {
-			parts := strings.SplitN(line.Text, "|", 5)
-			if len(parts) == 5 {
-				var ts int64
-				fmt.Sscanf(parts[4], "%d", &ts)
-				return &CommitInfo{
-					Hash:      parts[0],
-					Subject:   parts[1],
-					Author:    parts[2],
-					Email:     parts[3],
-					Timestamp: ts,
-				}, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no commit found")
-}
-
-func (d *DeployService) DetectProjectType(projectID string) ProjectType {
-	dir := filepath.Join("/tmp", projectID)
-
-	if fileExists(filepath.Join(dir, "package.json")) {
-		return ProjectNode
-	}
-	if fileExists(filepath.Join(dir, "requirements.txt")) || fileExists(filepath.Join(dir, "pyproject.toml")) {
-		return ProjectPython
-	}
-	if fileExists(filepath.Join(dir, "go.mod")) {
-		return ProjectGo
-	}
-	return ProjectStatic
-}
-
-// DetectWorkingDirectory tries to find the actual working directory for the project
-func (d *DeployService) DetectWorkingDirectory(projectID, userSpecified string) string {
-	baseDir := filepath.Join("/tmp", projectID)
-
-	// If user specified, use that
-	if userSpecified != "" && userSpecified != "." {
-		testPath := filepath.Join(baseDir, userSpecified)
-		if fileExists(testPath) {
-			return userSpecified
-		}
-	}
-
-	// Try common patterns
-	commonDirs := []string{"frontend", "client", "web", "app", "src"}
-	for _, dir := range commonDirs {
-		testPath := filepath.Join(baseDir, dir)
-		if fileExists(filepath.Join(testPath, "package.json")) ||
-			fileExists(filepath.Join(testPath, "requirements.txt")) ||
-			fileExists(filepath.Join(testPath, "go.mod")) {
-			return dir
-		}
-	}
-
-	// Default to root
-	return "."
-}
-
-func (d *DeployService) BuildNode(ctx context.Context, projectID, workingDir, buildCmd, outputDir string, envVars map[string]string, jobID string) (*exec.ExecResult, error) {
-	baseDir := filepath.Join("/tmp", projectID)
-	dir := baseDir
-	if workingDir != "" && workingDir != "." {
-		dir = filepath.Join(baseDir, workingDir)
-	}
-
-	// Helper to log build output to database for historical viewing
-	// (real-time WS broadcasting is handled by the Runner via BroadcastJobID)
-	logBuildOutput := func(result *exec.ExecResult) {
-		if result != nil {
-			for _, line := range result.Lines {
-				log := &state.DeployLog{
-					DeployID:     jobID,
-					Stream:       line.Stream,
-					Message:      line.Text,
-					LogTimestamp: line.Timestamp,
-				}
-				if err := d.db.CreateDeployLog(log); err != nil {
-					d.logger.Error("failed to save build log to database", zap.Error(err))
-				}
-			}
-		}
-	}
-
-	// Step 1: npm install
-	d.logger.Info("running npm install", zap.String("dir", dir))
-
-	// Log to database immediately so user sees progress
-	installLog := &state.DeployLog{
-		DeployID:     jobID,
-		Stream:       "stdout",
-		Message:      "Installing dependencies with npm install...",
-		LogTimestamp: time.Now(),
-	}
-	d.db.CreateDeployLog(installLog)
-	if d.broadcaster != nil {
-		d.broadcaster.BroadcastToJob(jobID, map[string]interface{}{
-			"type":      "deploy_log",
-			"deployId":  jobID,
-			"stream":    "stdout",
-			"message":   "Installing dependencies with npm install...",
-			"timestamp": installLog.LogTimestamp,
-		})
-	}
-
-	installResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID + "-install",
-		BroadcastJobID: jobID,
-		JobType:        "npm_install",
-		Command:        d.cfg.NpmBinary,
-		Args:           []string{"install", "--prefer-offline", "--no-audit", "--progress=true"},
-		WorkDir:        dir,
-		Env:            envVars,
-		MergeEnv:       true,
-		Timeout:        d.cfg.BuildTimeout,
-	})
-
-	// Log install output
-	logBuildOutput(installResult)
-
-	if err != nil || !installResult.Success {
-		return installResult, fmt.Errorf("npm install failed")
-	}
-
-	// Step 2: Check if package.json exists and has build script
-	packageJsonPath := filepath.Join(dir, "package.json")
-	if !fileExists(packageJsonPath) {
-		return nil, fmt.Errorf("package.json not found in %s", dir)
-	}
-
-	// Read package.json to check for build script
-	packageData, err := os.ReadFile(packageJsonPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read package.json: %w", err)
-	}
-
-	// Parse package.json to verify build script exists
-	var pkgJSON struct {
-		Scripts map[string]string `json:"scripts"`
-	}
-	if err := json.Unmarshal(packageData, &pkgJSON); err != nil {
-		d.logger.Warn("failed to parse package.json", zap.Error(err))
-	}
-
-	// Step 3: Build
-	if buildCmd == "" {
-		buildCmd = "build"
-	}
-
-	d.logger.Info("running npm build", zap.String("dir", dir), zap.String("cmd", buildCmd))
-
-	// Log to database immediately
-	buildLog := &state.DeployLog{
-		DeployID:     jobID,
-		Stream:       "stdout",
-		Message:      fmt.Sprintf("Running build command: npm run %s", buildCmd),
-		LogTimestamp: time.Now(),
-	}
-	d.db.CreateDeployLog(buildLog)
-	if d.broadcaster != nil {
-		d.broadcaster.BroadcastToJob(jobID, map[string]interface{}{
-			"type":      "deploy_log",
-			"deployId":  jobID,
-			"stream":    "stdout",
-			"message":   buildLog.Message,
-			"timestamp": buildLog.LogTimestamp,
-		})
-	}
-
-	buildResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID + "-build",
-		BroadcastJobID: jobID,
-		JobType:        "npm_build",
-		Command:        d.cfg.NpmBinary,
-		Args:           []string{"run", buildCmd},
-		WorkDir:        dir,
-		Env:            envVars,
-		MergeEnv:       true,
-		Timeout:        d.cfg.BuildTimeout,
-	})
-
-	// Log build output
-	logBuildOutput(buildResult)
-
-	if err != nil || !buildResult.Success {
-		return buildResult, fmt.Errorf("npm build failed")
-	}
-
-	// Step 4: Verify output directory
-	if outputDir == "" {
-		// Try common output directories
-		for _, candidate := range []string{"dist", "build", ".next", "out"} {
-			if fileExists(filepath.Join(dir, candidate)) {
-				outputDir = candidate
-				break
-			}
-		}
-	}
-	outPath := filepath.Join(dir, outputDir)
-	if !fileExists(outPath) {
-		return buildResult, fmt.Errorf("build output directory '%s' not found", outputDir)
-	}
-
-	return buildResult, nil
-}
-
-func (d *DeployService) BuildPython(ctx context.Context, projectID, workingDir string, envVars map[string]string, jobID string) (*exec.ExecResult, error) {
-	baseDir := filepath.Join("/tmp", projectID)
-	dir := baseDir
-	if workingDir != "" && workingDir != "." {
-		dir = filepath.Join(baseDir, workingDir)
-	}
-
-	// Step 1: Create virtualenv
-	_, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID + "-venv",
-		BroadcastJobID: jobID,
-		JobType:        "python_venv",
-		Command:        d.cfg.PythonBinary,
-		Args:           []string{"-m", "venv", ".venv"},
-		WorkDir:        dir,
-		MergeEnv:       true,
-		Timeout:        2 * time.Minute,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("venv creation failed: %w", err)
-	}
-
-	// Step 2: Install dependencies
-	pipPath := filepath.Join(dir, ".venv", "bin", "pip")
-	result, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID + "-pip",
-		BroadcastJobID: jobID,
-		JobType:        "pip_install",
-		Command:        pipPath,
-		Args:           []string{"install", "-r", "requirements.txt"},
-		WorkDir:        dir,
-		Env:            envVars,
-		MergeEnv:       true,
-		Timeout:        d.cfg.BuildTimeout,
-	})
-	if err != nil || !result.Success {
-		return result, fmt.Errorf("pip install failed")
-	}
-
-	return result, nil
-}
-
-func (d *DeployService) BuildGo(ctx context.Context, projectID, workingDir string, envVars map[string]string, jobID string) (*exec.ExecResult, error) {
-	baseDir := filepath.Join("/tmp", projectID)
-	dir := baseDir
-	if workingDir != "" && workingDir != "." {
-		dir = filepath.Join(baseDir, workingDir)
-	}
-
-	// Step 1: Download Go modules
-	d.logger.Info("running go mod download", zap.String("dir", dir))
-	modResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID + "-gomod",
-		BroadcastJobID: jobID,
-		JobType:        "go_mod_download",
-		Command:        d.cfg.GoBinary,
-		Args:           []string{"mod", "download"},
-		WorkDir:        dir,
-		Env:            envVars,
-		MergeEnv:       true,
-		Timeout:        d.cfg.BuildTimeout,
-	})
-
-	// Log module download output
-	if modResult != nil {
-		for _, line := range modResult.Lines {
-			log := &state.DeployLog{
-				DeployID:     jobID,
-				Stream:       line.Stream,
-				Message:      line.Text,
-				LogTimestamp: line.Timestamp,
-			}
-			if err := d.db.CreateDeployLog(log); err != nil {
-				d.logger.Error("failed to save build log to database", zap.Error(err))
-			}
-		}
-	}
-
-	if err != nil || !modResult.Success {
-		return modResult, fmt.Errorf("go mod download failed")
-	}
-
-	// Step 2: Build Go binary
-	d.logger.Info("running go build", zap.String("dir", dir))
-	buildResult, err := d.runner.Run(ctx, exec.RunOpts{
-		JobID:          jobID + "-gobuild",
-		BroadcastJobID: jobID,
-		JobType:        "go_build",
-		Command:        d.cfg.GoBinary,
-		Args:           []string{"build", "-o", "server", "."},
-		WorkDir:        dir,
-		Env: func() map[string]string {
-			merged := make(map[string]string)
-			for k, v := range envVars {
-				merged[k] = v
-			}
-			merged["CGO_ENABLED"] = "0"
-			return merged
-		}(),
-		MergeEnv: true,
-		Timeout:  d.cfg.BuildTimeout,
-	})
-
-	// Log build output
-	if buildResult != nil {
-		for _, line := range buildResult.Lines {
-			log := &state.DeployLog{
-				DeployID:     jobID,
-				Stream:       line.Stream,
-				Message:      line.Text,
-				LogTimestamp: line.Timestamp,
-			}
-			if err := d.db.CreateDeployLog(log); err != nil {
-				d.logger.Error("failed to save build log to database", zap.Error(err))
-			}
-		}
-	}
-
-	if err != nil || !buildResult.Success {
-		return buildResult, fmt.Errorf("go build failed")
-	}
-
-	return buildResult, nil
+	// Bare script name — expand via npm.
+	return "npm run " + cmd
 }
 
 func (d *DeployService) Deploy(ctx context.Context, project *state.Project) (string, error) {
@@ -654,7 +285,6 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 	// Run in background goroutine
 	go func() {
-		var err error
 		buildStart := time.Now()
 
 		// Create a new context for the deployment (not tied to the HTTP request)
@@ -663,6 +293,17 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 		logToDB("stdout", "Starting deployment...")
 		logToDB("stdout", fmt.Sprintf("Repository: %s", project.RepoURL))
 		logToDB("stdout", fmt.Sprintf("Branch: %s", project.Branch))
+
+		// RepoURL and Branch are interpolated into `sh -c` clone commands below,
+		// so reject anything that is not a plain git URL / ref before we get there.
+		if !isValidRepoURL(project.RepoURL) {
+			d.failDeploy(deploy, "invalid repository URL")
+			return
+		}
+		if !isValidGitRef(project.Branch) {
+			d.failDeploy(deploy, "invalid branch name")
+			return
+		}
 
 		workingDir := project.WorkingDirectory
 		if workingDir == "" || workingDir == "." {
@@ -1103,6 +744,12 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// Use the LXD service's framework detection helper
 			framework = d.lxd.DetectFrameworkInContainer(deployCtx, containerInfo.ID, workDir)
 
+			if !IsSupportedFrontendFramework(framework) {
+				logToDB("stderr", fmt.Sprintf("Unsupported project type '%s'. This build pipeline supports Next.js and React frontends only.", framework))
+				d.failDeploy(deploy, fmt.Sprintf("unsupported framework: %s", framework))
+				return
+			}
+
 			d.logger.Info("detected framework",
 				zap.String("projectId", project.ID),
 				zap.String("framework", string(framework)),
@@ -1123,12 +770,13 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			// so they're available during npm install / pip install
 			if len(envVars) > 0 {
 				logToDB("stdout", "Writing environment variables to .env file...")
+				// Write via stdin rather than a heredoc: a value containing the
+				// delimiter (or a newline) would otherwise break out of it.
 				envContent := ""
 				for k, v := range envVars {
 					envContent += fmt.Sprintf("%s=%s\n", k, v)
 				}
-				writeEnvCmd := fmt.Sprintf("cat > /app/repo/.env << 'EOF'\n%sEOF", envContent)
-				d.lxd.RunCommandInContainer(deployCtx, containerInfo.ID, writeEnvCmd)
+				d.lxd.WriteFileInContainer(deployCtx, containerInfo.ID, "/app/repo/.env", envContent)
 			}
 
 			startCmd = ""
@@ -1347,6 +995,11 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				// Override with user-provided build command if specified
 				if project.BuildCommand != "" && project.BuildCommand != "skip" {
 					buildCmd = project.BuildCommand
+				}
+
+				// Accept both "build" and "npm run build" from the user
+				if buildCmd != "" {
+					buildCmd = NormalizeBuildCommand(buildCmd)
 				}
 
 				if buildCmd != "" {
@@ -1571,160 +1224,10 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 				})
 			}
 			d.broadcastPhase(deployID, "done", "Deploy complete!")
-
-		} else {
-			logToDB("stdout", "Using native build")
-
-			switch projectType {
-			case ProjectNode:
-				_, err = d.BuildNode(deployCtx, project.ID, workingDir, project.BuildCommand, project.OutputDir, envVars, deployID)
-			case ProjectPython:
-				_, err = d.BuildPython(deployCtx, project.ID, workingDir, envVars, deployID)
-			case ProjectGo:
-				_, err = d.BuildGo(deployCtx, project.ID, workingDir, envVars, deployID)
-			case ProjectStatic:
-				logToDB("stdout", "Static project — no build needed")
-			}
-
-			if err != nil {
-				logToDB("stderr", fmt.Sprintf("Build failed: %s", err.Error()))
-				d.failDeploy(deploy, err.Error())
-				return
-			}
-
-			// Start native backend service
-			if isBackend {
-				d.broadcastPhase(deployID, "service", "Starting backend service...")
-				logToDB("stdout", "Starting backend service...")
-
-				startCmd := ""
-				if project.StartCommand != nil && *project.StartCommand != "" {
-					startCmd = *project.StartCommand
-				} else {
-					startCmd = GetDefaultStartCommand(framework, GetDefaultPort(framework))
-				}
-
-				if startCmd != "" {
-					serviceErr := d.CreateServiceForFramework(project.ID, project.Name, framework, envVars)
-					if serviceErr != nil {
-						logToDB("stderr", fmt.Sprintf("Failed to create service: %s", serviceErr.Error()))
-					} else {
-						logToDB("stdout", fmt.Sprintf("Backend service started (command: %s)", startCmd))
-					}
-				}
-			} else {
-				// Frontend native: copy to nginx
-				d.broadcastPhase(deployID, "service", "Deploying frontend...")
-				logToDB("stdout", "Deploying frontend static files...")
-				outputPath, copyErr := d.copyFrontendToNginx(project.ID, project.Name, workingDir, project.OutputDir)
-				if copyErr != nil {
-					logToDB("stderr", fmt.Sprintf("Failed to deploy frontend: %s", copyErr.Error()))
-					d.failDeploy(deploy, copyErr.Error())
-					return
-				}
-				logToDB("stdout", fmt.Sprintf("Frontend deployed to: %s", outputPath))
-			}
-
-			// SUCCESS
-			now := time.Now()
-			buildDuration := now.Sub(buildStart)
-			buildDurationSeconds := buildDuration.Seconds()
-
-			// Record performance statistics for auto-optimization
-			if d.perfOptimizer != nil {
-				d.perfOptimizer.RecordBuildStats(buildDuration)
-			}
-			deploy.Status = "success"
-			deploy.EndedAt = &now
-			deploy.ExitCode = 0
-			deploy.BuildDuration = buildDurationSeconds
-			d.db.UpdateDeploy(deploy)
-
-			d.logger.Info("deploy completed", zap.String("deployId", deployID), zap.String("projectId", project.ID), zap.String("framework", string(framework)), zap.Float64("buildDuration", buildDurationSeconds))
-
-			logToDB("stdout", "")
-			logToDB("stdout", fmt.Sprintf("Deployment completed successfully! (%.1fs)", buildDurationSeconds))
-
-			if d.broadcaster != nil {
-				d.broadcaster.BroadcastToJob(deployID, map[string]interface{}{
-					"type":          "deploy_result",
-					"deployId":      deployID,
-					"status":        "success",
-					"framework":     string(framework),
-					"isBackend":     isBackend,
-					"buildDuration": buildDuration,
-				})
-			}
-			d.broadcastPhase(deployID, "done", "Deploy complete!")
 		}
 	}()
 
 	return deployID, nil
-}
-
-// copyFrontendToNginx copies the frontend build output to the nginx sites directory
-// Returns the path where files were copied to
-func (d *DeployService) copyFrontendToNginx(projectID, projectName, workingDir, outputDir string) (string, error) {
-	baseDir := filepath.Join("/tmp", projectID)
-	srcDir := baseDir
-	if workingDir != "" && workingDir != "." {
-		srcDir = filepath.Join(baseDir, workingDir)
-	}
-
-	// Auto-detect output directory if not specified
-	if outputDir == "" {
-		for _, candidate := range []string{"dist", "build", "out", ".next/out", ".next/static"} {
-			if fileExists(filepath.Join(srcDir, candidate)) {
-				outputDir = candidate
-				break
-			}
-		}
-		if outputDir == "" {
-			outputDir = "dist"
-		}
-	}
-
-	srcPath := filepath.Join(srcDir, outputDir)
-	if !fileExists(srcPath) {
-		return "", fmt.Errorf("build output directory '%s' not found at %s", outputDir, srcPath)
-	}
-
-	// Create a sanitized folder name from project name
-	safeName := sanitizeFolderName(projectName)
-	if safeName == "" {
-		safeName = projectID[:8]
-	}
-
-	// Destination: /var/www/opendeploy/sites/<project-name>/
-	destDir := filepath.Join(d.cfg.OutputRoot, "sites", safeName)
-
-	// Remove old files
-	os.RemoveAll(destDir)
-	os.MkdirAll(destDir, 0755)
-
-	// Copy files using cp -a for proper permissions
-	ctx := context.Background()
-	result, err := d.runner.Run(ctx, exec.RunOpts{
-		JobType: "copy_frontend",
-		Command: "/bin/cp",
-		Args:    []string{"-a", srcPath + "/.", destDir},
-		Timeout: 2 * time.Minute,
-	})
-
-	if err != nil || (result != nil && !result.Success) {
-		// Fallback: try with sudo
-		result, err = d.runner.Run(ctx, exec.RunOpts{
-			JobType: "copy_frontend_sudo",
-			Command: "/usr/bin/sudo",
-			Args:    []string{"/bin/cp", "-a", srcPath + "/.", destDir},
-			Timeout: 2 * time.Minute,
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to copy frontend output: %w", err)
-		}
-	}
-
-	return destDir, nil
 }
 
 // sanitizeFolderName converts a project name into a safe directory name
@@ -1762,9 +1265,7 @@ func (d *DeployService) Rebuild(ctx context.Context, project *state.Project) (st
 		}
 	}
 
-	// Remove old project directory
-	projectDir := filepath.Join("/tmp", project.ID)
-	os.RemoveAll(projectDir)
+	// Old source is removed with the container above; nothing is kept on the host.
 
 	d.logger.Info("rebuild initiated",
 		zap.String("projectId", project.ID),
@@ -1816,91 +1317,29 @@ func (d *DeployService) failDeploy(deploy *state.Deploy, errMsg string) {
 	}
 }
 
-func (d *DeployService) StartAppService(name, workDir, command string, envVars map[string]string) error {
-	envLines := ""
-	for k, v := range envVars {
-		envLines += fmt.Sprintf("Environment=%s=%s\n", k, v)
-	}
-
-	unit := fmt.Sprintf(`[Unit]
-Description=OpenDeploy App: %s
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=%s
-ExecStart=%s
-Restart=always
-RestartSec=3
-%s
-[Install]
-WantedBy=multi-user.target
-`, name, workDir, command, envLines)
-
-	serviceName := fmt.Sprintf("opendeploy-app-%s", name)
-	servicePath := fmt.Sprintf("/etc/systemd/system/%s.service", serviceName)
-	if err := os.WriteFile(servicePath, []byte(unit), 0644); err != nil {
-		tmpPath := fmt.Sprintf("/tmp/%s.service", serviceName)
-		if writeErr := os.WriteFile(tmpPath, []byte(unit), 0644); writeErr != nil {
-			return fmt.Errorf("writing service file: %w", err)
-		}
-		ctx := context.Background()
-		d.runner.Run(ctx, exec.RunOpts{
-			JobType: "systemctl",
-			Command: "/usr/bin/sudo",
-			Args:    []string{"/usr/bin/cp", tmpPath, servicePath},
-			Timeout: 10 * time.Second,
-		})
-		os.Remove(tmpPath)
-	}
-
-	// Reload and start
-	ctx := context.Background()
-	d.runner.Run(ctx, exec.RunOpts{
-		JobType: "systemctl",
-		Command: "/usr/bin/sudo",
-		Args:    []string{"/usr/bin/systemctl", "daemon-reload"},
-		Timeout: 10 * time.Second,
-	})
-	d.runner.Run(ctx, exec.RunOpts{
-		JobType: "systemctl",
-		Command: "/usr/bin/sudo",
-		Args:    []string{"/usr/bin/systemctl", "enable", serviceName},
-		Timeout: 10 * time.Second,
-	})
-	_, err := d.runner.Run(ctx, exec.RunOpts{
-		JobType: "systemctl",
-		Command: "/usr/bin/sudo",
-		Args:    []string{"/usr/bin/systemctl", "start", serviceName},
-		Timeout: 15 * time.Second,
-	})
-	return err
-}
-
-// CreateServiceForFramework generates and starts a systemd service for the given framework.
-func (d *DeployService) CreateServiceForFramework(projectID, projectName string, framework FrameworkType, envVars map[string]string) error {
-	if !IsBackendFramework(framework) {
-		return nil // Static sites don't need a service
-	}
-
-	backendDir := filepath.Join(d.cfg.OutputRoot, "backend", projectID)
-	startCmd := GetStartCommand(framework, backendDir)
-	if startCmd == "" {
-		return fmt.Errorf("no start command for framework: %s", framework)
-	}
-
-	// Add PORT env var if not set
-	if _, ok := envVars["PORT"]; !ok {
-		envVars["PORT"] = fmt.Sprintf("%d", GetDefaultPort(framework))
-	}
-
-	return d.StartAppService(projectName, backendDir, startCmd, envVars)
-}
-
-var repoURLRegex = regexp.MustCompile(`^(https?://|git@)[a-zA-Z0-9._\-/:]+\.git$|^https?://[a-zA-Z0-9._\-/]+$`)
+// repoURLRegex allows only https://, git@ SSH remotes, and git:// URLs built
+// from a restricted character set. Shell metacharacters (`;`, `|`, `&`, `$`,
+// backticks, whitespace) are excluded because the URL is interpolated into an
+// `sh -c` git clone command inside the container.
+var repoURLRegex = regexp.MustCompile(`^(https://[a-zA-Z0-9._\-]+(:[0-9]+)?/[a-zA-Z0-9._\-/]+(\.git)?|git@[a-zA-Z0-9._\-]+:[a-zA-Z0-9._\-/]+(\.git)?|git://[a-zA-Z0-9._\-]+/[a-zA-Z0-9._\-/]+(\.git)?)$`)
 
 func isValidRepoURL(url string) bool {
 	return repoURLRegex.MatchString(url)
+}
+
+// gitRefRegex matches a branch/tag name without shell metacharacters. Refs are
+// passed to `git clone --branch <ref>`, so they must be inert.
+var gitRefRegex = regexp.MustCompile(`^[a-zA-Z0-9._\-/]{1,255}$`)
+
+func isValidGitRef(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	// Reject refs that git itself forbids or that would change option parsing.
+	if strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") {
+		return false
+	}
+	return gitRefRegex.MatchString(ref)
 }
 
 func fileExists(path string) bool {

@@ -142,7 +142,7 @@ export default function DeployPage() {
       setOutputDir('')
       setBackendPort('8000')
     } else if (projectType === 'web_service') {
-      setBuildCmd('build')
+      setBuildCmd('npm run build')
       setOutputDir('')
       setBackendPort('')
     }
@@ -659,7 +659,7 @@ export default function DeployPage() {
                             placeholder="npm run build"
                           />
                           <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                            Full command (e.g., "npm run build", "yarn build")
+                            Full command (e.g., &quot;npm run build&quot;, &quot;yarn build&quot;, &quot;pnpm build&quot;). A bare script name like &quot;build&quot; also works.
                           </p>
                         </div>
                         <div>
@@ -692,7 +692,7 @@ export default function DeployPage() {
                           placeholder="npm install"
                         />
                         <p className="mt-1.5 font-mono text-[10px] text-text-secondary">
-                          Full install command (e.g., "npm install", "pip install -r requirements.txt", "go mod download")
+                          Full command, exactly as you would type it in a terminal (e.g., &quot;npm install&quot;, &quot;yarn install --frozen-lockfile&quot;, &quot;pnpm install&quot;). Leave blank for the default.
                         </p>
                     </div>
 
