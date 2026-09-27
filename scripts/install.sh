@@ -32,8 +32,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-log()  { echo -e "${GREEN}[opendeploy]${NC} $*"; }
-warn() { echo -e "${YELLOW}[opendeploy]${NC} $*"; }
+log()  { echo -e "${GREEN}[opendeploy]${NC} $*" >&2; }
+warn() { echo -e "${YELLOW}[opendeploy]${NC} $*" >&2; }
 err()  { echo -e "${RED}[opendeploy]${NC} $*" >&2; }
 
 usage() {
