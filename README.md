@@ -86,6 +86,22 @@ go run ./cmd/opendeploy --config config.example.yaml
 The frontend is a static Next.js export. [`frontend/next.config.js`](frontend/next.config.js) sets `distDir` to `../backend/static/frontend`, so `npm run build` writes files that Go embeds via `go:embed` — **no manual `cp` step**.
 
 ```bash
+cd frontend
+npm run build
+```
+
+1. **Frontend Build Output Location:**
+
+The frontend is configured in `/frontend/next.config.js` with:
+
+- `output: 'export'`
+- `distDir: '../backend/static/frontend'`
+
+So `npm run build` already writes the static frontend files directly to `backend/static/frontend/` and no separate `cp` step is required.
+
+1. **Cross-Compile Go for (Linux ARM64):**
+
+```bash
 # From repo root — Makefile handles frontend export + arm64 binary:
 make -C backend build-release
 
