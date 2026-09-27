@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Binaries are committed under backend/. Uploaded as-is — no build.
+      - name: Verify expected assets
+        run: |
+          cd backend
+          for a in linux-arm64 linux-amd64 linux-armv7 linux-x86; do
+            test -f "opendeploy-$a" || { echo "missing opendeploy-$a"; exit 1; }
+          done
+          ls -la opendeploy-*
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            backend/opendeploy-linux-arm64
+            backend/opendeploy-linux-amd64
+            backend/opendeploy-linux-armv7
+            backend/opendeploy-linux-x86
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}

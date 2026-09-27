@@ -11,7 +11,7 @@ build:
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/opendeploy
 
 # Build for all supported Linux architectures
-build-all: build-linux-arm64 build-linux-amd64 build-linux-arm build-linux-386
+build-all: build-linux-arm64 build-linux-amd64 build-linux-arm build-linux-x86
 
 build-linux-arm64:
 	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux-arm64 ./cmd/opendeploy
@@ -22,8 +22,8 @@ build-linux-amd64:
 build-linux-arm:
 	GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux-armv7 ./cmd/opendeploy
 
-build-linux-386:
-	GOOS=linux GOARCH=386 go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux-386 ./cmd/opendeploy
+build-linux-x86:
+	GOOS=linux GOARCH=386 go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux-x86 ./cmd/opendeploy
 
 # Build the frontend, then embed and compile Go binary
 build-release: build-frontend build-linux-arm64
@@ -56,7 +56,7 @@ else ifeq ($(HOST_ARCH),x86_64)
 else ifeq ($(HOST_ARCH),armv7l)
   INSTALL_SUFFIX := linux-armv7
 else ifeq ($(HOST_ARCH),i686)
-  INSTALL_SUFFIX := linux-386
+  INSTALL_SUFFIX := linux-x86
 else
   INSTALL_SUFFIX := linux-$(HOST_ARCH)
 endif
@@ -65,7 +65,7 @@ endif
 # Prefer scripts/install.sh for full OS dependency bootstrap.
 install:
 	@test -f $(BINARY_NAME)-$(INSTALL_SUFFIX) || test -f $(BINARY_NAME) || \
-		(echo "Missing binary $(BINARY_NAME)-$(INSTALL_SUFFIX). Run: make build-linux-arm64|build-linux-amd64|build-linux-arm|build-linux-386 or make build"; exit 1)
+		(echo "Missing binary $(BINARY_NAME)-$(INSTALL_SUFFIX). Run: make build-linux-arm64|build-linux-amd64|build-linux-arm|build-linux-x86 or make build"; exit 1)
 	@if [ -f $(BINARY_NAME)-$(INSTALL_SUFFIX) ]; then \
 		install -m 755 $(BINARY_NAME)-$(INSTALL_SUFFIX) /usr/local/bin/opendeploy; \
 	else \

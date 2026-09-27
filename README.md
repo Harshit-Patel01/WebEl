@@ -14,7 +14,7 @@ OpenDeploy is a Next.js and Go-based dashboard designed to turn a Linux device, 
 ## System Requirements
 
 * **Operating Systems:** Raspberry Pi OS (Debian-based), Ubuntu, and Debian. The `apt-get` package manager is required.
-* **Supported Architectures:** `arm64` (Pi 3/4/5 64-bit), `amd64`, `armv7` (32-bit Pi), and `386`.
+* **Supported Architectures:** `arm64` (Pi 3/4/5 64-bit), `amd64`, `armv7` (32-bit Pi), and `x86` (32-bit x86).
 * **Required Packages:** nginx (reverse proxy), NetworkManager and nmcli (client WiFi), hostapd and dnsmasq (hotspot), avahi-daemon (`*.local` resolution), LXD / LXC (app containers via snap or apt), git, python3, and iptables / iptables-persistent (Hotspot NAT).
 * **Additional Dependencies:** Node/npm is recommended. The `cloudflared` package is automatically downloaded for the running architecture when setting up a tunnel.
 
@@ -105,7 +105,7 @@ The most straightforward way to produce a release binary is via the provided Mak
 make -C backend build-release
 make -C backend build-linux-amd64
 make -C backend build-linux-arm
-make -C backend build-linux-386
+make -C backend build-linux-x86
 make -C backend build-all
 ```
 
@@ -121,8 +121,7 @@ env GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o opendeploy-linux-arm64 
 If you are developing on Windows (where `make` is not available by default), we have provided a PowerShell script that mimics the Makefile:
 
 ```powershell
-cd backend
-.\build.ps1 build-release    # Builds frontend and arm64 binary
-.\build.ps1 build-all        # Builds for all Linux architectures
-.\build.ps1 build-linux-amd64
+.\scripts\build.ps1 build-release    # Builds frontend and arm64 binary
+.\scripts\build.ps1 build-all        # Builds for all Linux architectures
+.\scripts\build.ps1 build-linux-amd64
 ```

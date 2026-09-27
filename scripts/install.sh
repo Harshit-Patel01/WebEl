@@ -119,7 +119,7 @@ binary_suffix() {
     arm64) echo "linux-arm64" ;;
     amd64) echo "linux-amd64" ;;
     armv7) echo "linux-armv7" ;;
-    386)   echo "linux-386" ;;
+    386)   echo "linux-x86" ;;
     *) err "Unknown arch mapping: ${arch}"; exit 1 ;;
   esac
 }

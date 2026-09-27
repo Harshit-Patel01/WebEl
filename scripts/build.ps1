@@ -54,15 +54,15 @@ switch ($Target) {
     "build-linux-arm" {
         Build-Binary "linux" "arm" "7" "linux-armv7"
     }
-    "build-linux-386" {
-        Build-Binary "linux" "386" "" "linux-386"
+    "build-linux-x86" {
+        Build-Binary "linux" "386" "" "linux-x86"
     }
     "build-all" {
         Build-Frontend
         Build-Binary "linux" "arm64" "" "linux-arm64"
         Build-Binary "linux" "amd64" "" "linux-amd64"
         Build-Binary "linux" "arm" "7" "linux-armv7"
-        Build-Binary "linux" "386" "" "linux-386"
+        Build-Binary "linux" "386" "" "linux-x86"
     }
     "build-release" {
         Build-Frontend
@@ -76,6 +76,6 @@ switch ($Target) {
     }
     default {
         Write-Host "Unknown target: $Target"
-        Write-Host "Valid targets: build, build-frontend, build-linux-arm64, build-linux-amd64, build-linux-arm, build-linux-386, build-all, build-release"
+        Write-Host "Valid targets: build, build-frontend, build-linux-arm64, build-linux-amd64, build-linux-arm, build-linux-x86, build-all, build-release"
     }
 }
