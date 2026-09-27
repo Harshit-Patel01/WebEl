@@ -423,32 +423,16 @@ write_nginx_config() {
 
   local nginx_conf="/etc/nginx/sites-available/opendeploy"
 
-  cat > "${nginx_conf}" <<NGINX
-server {
-    listen 80;
-    server_name ${_server_names};
+  log "Writing nginx config (${_server_names} + catch-all)..."
 
-    access_log  /var/log/nginx/opendeploy-access.log;
-    error_log   /var/log/nginx/opendeploy-error.log;
+  local _tmp_conf
+  _tmp_conf="$(mktemp)"
 
-    location / {
-        proxy_pass            http://127.0.0.1:3000;
-        proxy_http_version    1.1;
-        proxy_set_header      Upgrade           \$http_upgrade;
-        proxy_set_header      Connection        "upgrade";
-        proxy_set_header      Host              \$host;
-        proxy_set_header      X-Real-IP         \$remote_addr;
-        proxy_set_header      X-Forwarded-For   \$proxy_add_x_forwarded_for;
-        proxy_set_header      X-Forwarded-Proto \$scheme;
-        proxy_read_timeout    60s;
-        proxy_send_timeout    60s;
-        proxy_cache_bypass    \$http_upgrade;
-    }
-}
-
+  cat > "${_tmp_conf}" <<'NGINX'
 server {
     listen 80 default_server;
-    server_name ~^\d{1,3}(\.\d{1,3}){3}\$ "";
+    listen [::]:80 default_server;
+    server_name __SERVER_NAMES__ _;
 
     access_log  /var/log/nginx/opendeploy-access.log;
     error_log   /var/log/nginx/opendeploy-error.log;
@@ -456,28 +440,42 @@ server {
     location / {
         proxy_pass            http://127.0.0.1:3000;
         proxy_http_version    1.1;
-        proxy_set_header      Upgrade           \$http_upgrade;
+        proxy_set_header      Upgrade           $http_upgrade;
         proxy_set_header      Connection        "upgrade";
-        proxy_set_header      Host              \$host;
-        proxy_set_header      X-Real-IP         \$remote_addr;
-        proxy_set_header      X-Forwarded-For   \$proxy_add_x_forwarded_for;
-        proxy_set_header      X-Forwarded-Proto \$scheme;
+        proxy_set_header      Host              $host;
+        proxy_set_header      X-Real-IP         $remote_addr;
+        proxy_set_header      X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto $scheme;
         proxy_read_timeout    60s;
         proxy_send_timeout    60s;
-        proxy_cache_bypass    \$http_upgrade;
+        proxy_cache_bypass    $http_upgrade;
     }
 }
 NGINX
 
+  sed -i "s/__SERVER_NAMES__/${_server_names}/g" "${_tmp_conf}"
+  mv "${_tmp_conf}" "${nginx_conf}"
+
   chmod 644 "${nginx_conf}"
+
   rm -f /etc/nginx/sites-enabled/default
+  rm -f /etc/nginx/sites-available/default
+  rm -f /etc/nginx/conf.d/default.conf
+
+  if [[ -f /etc/nginx/nginx.conf ]]; then
+    if grep -q 'listen.*80.*default_server' /etc/nginx/nginx.conf 2>/dev/null; then
+      log "Disabling embedded default server in nginx.conf..."
+      sed -i '/^[^#]*listen.*80.*default_server/,/^[[:space:]]*\}/{ s/^/#OD# /; }' /etc/nginx/nginx.conf
+    fi
+  fi
+
   ln -sf "${nginx_conf}" /etc/nginx/sites-enabled/opendeploy
 
-  if nginx -t 2>/dev/null; then
-    systemctl reload nginx 2>/dev/null || true
-    log "nginx: port 80 → 3000 (${_server_names} + direct IP)"
+  if nginx -t 2>&1; then
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+    log "nginx: port 80 -> OpenDeploy portal (${_server_names} + catch-all)"
   else
-    warn "nginx config test failed; check ${nginx_conf}"
+    warn "nginx config test failed -- run 'nginx -t' to debug"
   fi
 }
 

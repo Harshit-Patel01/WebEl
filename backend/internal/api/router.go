@@ -28,6 +28,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.RequestID)
 	r.Use(loggingMiddleware(logger))
+	r.Use(lanAccessMiddleware(db, logger))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -182,6 +183,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Get("/system/stats", systemH.getStats)
 			r.Get("/system/info", systemH.getInfo)
 			r.Get("/system/setup-state", systemH.getSetupState)
+			r.Post("/system/setup-state", systemH.setSetupState)
 
 			// Jobs
 			r.Get("/jobs/{id}", jobH.getJob)

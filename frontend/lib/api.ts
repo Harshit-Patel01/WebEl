@@ -71,6 +71,10 @@ export const systemApi = {
   getStats: () => fetchApi<{ cpu: number; ram: number; temp: number; uptime: string }>('/system/stats'),
   getInfo: () => fetchApi<{ hostname: string; ip: string; model: string; os: string }>('/system/info'),
   getSetupState: () => fetchApi<Record<string, string>>('/system/setup-state'),
+  setSetupState: (data: Record<string, string>) => fetchApi<{ status: string }>('/system/setup-state', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
 }
 
 // WiFi API

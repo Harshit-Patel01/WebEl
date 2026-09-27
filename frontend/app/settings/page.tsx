@@ -100,6 +100,10 @@ export default function SettingsPage() {
         setSystemStats(stats)
         const wifi = await wifiApi.getStatus()
         setWifiStatus(wifi)
+        
+        // Fetch setup state for LAN-only toggle
+        const setupState = await systemApi.getSetupState()
+        setLanOnly(setupState['lan_access_only'] === 'true')
       } catch (err) {
         console.error('Failed to load system data', err)
       }
@@ -191,7 +195,6 @@ export default function SettingsPage() {
     setApiKeyMessage({ text: 'API token removed', type: 'success' })
   }
 
-  // Handle logout
   const handleLogout = async () => {
     try {
       await authApi.logout()
@@ -200,6 +203,19 @@ export default function SettingsPage() {
     }
     // Dispatch event so layout.tsx can switch to login screen
     window.dispatchEvent(new Event('opendeploy-logout'))
+  }
+
+  // Handle LAN-only toggle
+  const handleLanOnlyToggle = async () => {
+    const newValue = !lanOnly;
+    setLanOnly(newValue);
+    try {
+      await systemApi.setSetupState({ lan_access_only: newValue.toString() });
+    } catch (err) {
+      console.error('Failed to update LAN access setting:', err);
+      // Revert on failure
+      setLanOnly(!newValue);
+    }
   }
 
   return (
@@ -431,7 +447,7 @@ export default function SettingsPage() {
                         </p>
                       </div>
                       <button
-                        onClick={() => setLanOnly(!lanOnly)}
+                        onClick={handleLanOnlyToggle}
                         className={`
                           w-10 h-5  transition-colors relative
                           ${lanOnly ? 'bg-accent-lime' : 'bg-border-dark'}
@@ -561,7 +577,7 @@ export default function SettingsPage() {
                   <div className="space-y-4 font-mono text-small">
                     {[
                       ['Version', '1.0.0'],
-                      ['Build', '2026.03.15-abc123'],
+                      ['Build', '2026.09.27-b01'],
                       ['License', 'MIT'],
                       ['Author', 'Harshit Singh Patel'],
                     ].map(([label, value]) => (

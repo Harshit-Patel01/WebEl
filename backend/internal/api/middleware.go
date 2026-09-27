@@ -9,6 +9,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/opendeploy/opendeploy/internal/state"
 	"go.uber.org/zap"
 )
 
@@ -44,6 +45,26 @@ func loggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 				zap.Int("status", wrapped.status),
 				zap.Duration("duration", time.Since(start)),
 			)
+		})
+	}
+}
+
+// LAN Access only middleware
+func lanAccessMiddleware(db *state.DB, logger *zap.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			lanOnly, _ := db.GetSetupState("lan_access_only")
+			if lanOnly == "true" {
+				if r.Header.Get("CF-Connecting-IP") != "" {
+					logger.Warn("Blocked Cloudflare access due to LAN-only policy",
+						zap.String("ip", r.Header.Get("CF-Connecting-IP")),
+						zap.String("path", r.URL.Path),
+					)
+					http.Error(w, `{"error":"access restricted to local network only"}`, http.StatusForbidden)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

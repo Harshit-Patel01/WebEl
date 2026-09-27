@@ -1188,6 +1188,21 @@ func (h *systemHandlers) getSetupState(w http.ResponseWriter, r *http.Request) {
 	respondOK(w, states)
 }
 
+func (h *systemHandlers) setSetupState(w http.ResponseWriter, r *http.Request) {
+	var req map[string]string
+	if err := parseBody(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	for k, v := range req {
+		if err := h.db.SetSetupState(k, v); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	respondOK(w, map[string]string{"status": "ok"})
+}
+
 // --- Services handlers ---
 
 type servicesHandlers struct {
