@@ -64,8 +64,6 @@ go.work
 go.work.sum
 
 # Go build artifacts
-backend/opendeploy
-backend/opendeploy-*
 backend/*.exe
 backend/*.dll
 backend/*.so

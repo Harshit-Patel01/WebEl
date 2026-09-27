@@ -332,9 +332,7 @@ export default function DeploymentsPage() {
     const project = projects.find(p => p.id === projectId)
     if (project) {
       const projectContainers = containers[projectId] || []
-      // For full-stack, prefer backend container port
-      const backendContainer = projectContainers.find(c => c.name.includes('-backend'))
-      const container = backendContainer || projectContainers[0]
+      const container = projectContainers[0]
       if (container?.port_mappings) {
         try {
           const mapping = JSON.parse(container.port_mappings)
@@ -706,10 +704,9 @@ export default function DeploymentsPage() {
                       <div className="space-y-3">
                         {projectContainers.map((container) => {
                           const isBackend = container.name.includes('-backend')
-                          const isFrontend = container.name.includes('-frontend')
-                          const containerLabel = isBackend ? 'BACKEND' : isFrontend ? 'FRONTEND' : 'SERVICE'
-                          const labelColor = isBackend ? 'bg-blue-500' : isFrontend ? 'bg-purple-500' : 'bg-accent-lime'
-                          
+                          const containerLabel = isBackend ? 'BACKEND' : 'SERVICE'
+                          const labelColor = isBackend ? 'bg-blue-500' : 'bg-accent-lime'
+
                           return (
                             <div key={container.id} className="p-3 border border-border-dark bg-bg-secondary/50">
                               {/* Container Header */}

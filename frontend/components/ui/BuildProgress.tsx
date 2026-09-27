@@ -4,19 +4,16 @@ interface BuildProgressProps {
   currentPhase: number
   phases?: string[]
   isBackend?: boolean
-  isFullStack?: boolean
 }
 
 const defaultPhases = ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
 
-export default function BuildProgress({ currentPhase, phases, isBackend = false, isFullStack = false }: BuildProgressProps) {
+export default function BuildProgress({ currentPhase, phases, isBackend = false }: BuildProgressProps) {
   // Use custom phases if provided, otherwise determine based on deployment type
   const displayPhases = phases || (
-    isFullStack
-      ? ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
-      : isBackend
-        ? ['Clone', 'Detect', 'Build', 'Start', 'Done']
-        : ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
+    isBackend
+      ? ['Clone', 'Detect', 'Build', 'Start', 'Done']
+      : ['Clone', 'Detect', 'Build', 'Deploy', 'Done']
   )
   return (
     <div className="flex items-center gap-1 w-full">
