@@ -1,6 +1,6 @@
 # OpenDeploy
 
-OpenDeploy is a Next.js and Go-based dashboard designed to turn a Linux device, particularly a Raspberry Pi, into a self-hosted platform-as-a-service (PaaS)[cite: 1]. Users can plug in the device, open the dashboard, connect to WiFi or a Cloudflare Tunnel, and deploy GitHub applications into LXD containers situated behind an nginx reverse proxy[cite: 1].
+OpenDeploy is a Next.js and Go-based dashboard designed to turn a Linux device, particularly a Raspberry Pi, into a self-hosted platform-as-a-service (PaaS). Users can plug in the device, open the dashboard, connect to WiFi or a Cloudflare Tunnel, and deploy GitHub applications into LXD containers situated behind an nginx reverse proxy.
 
 ## UI Screenshots
 
@@ -13,90 +13,106 @@ OpenDeploy is a Next.js and Go-based dashboard designed to turn a Linux device, 
 
 ## System Requirements
 
-* **Operating Systems:** Raspberry Pi OS (Debian-based), Ubuntu, and Debian[cite: 1]. The `apt-get` package manager is required[cite: 1].
-* **Supported Architectures:** `arm64` (Pi 3/4/5 64-bit), `amd64`, `armv7` (32-bit Pi), and `386`[cite: 1].
-* **Required Packages:** nginx (reverse proxy), NetworkManager and nmcli (client WiFi), hostapd and dnsmasq (hotspot), avahi-daemon (`*.local` resolution), LXD / LXC (app containers via snap or apt), git, python3, and iptables / iptables-persistent (Hotspot NAT)[cite: 1].
-* **Additional Dependencies:** Node/npm is recommended[cite: 1]. The `cloudflared` package is automatically downloaded for the running architecture when setting up a tunnel[cite: 1].
+* **Operating Systems:** Raspberry Pi OS (Debian-based), Ubuntu, and Debian. The `apt-get` package manager is required.
+* **Supported Architectures:** `arm64` (Pi 3/4/5 64-bit), `amd64`, `armv7` (32-bit Pi), and `386`.
+* **Required Packages:** nginx (reverse proxy), NetworkManager and nmcli (client WiFi), hostapd and dnsmasq (hotspot), avahi-daemon (`*.local` resolution), LXD / LXC (app containers via snap or apt), git, python3, and iptables / iptables-persistent (Hotspot NAT).
+* **Additional Dependencies:** Node/npm is recommended. The `cloudflared` package is automatically downloaded for the running architecture when setting up a tunnel.
 
 ## Installation Instructions
 
 ### One-Command Installation
-For a fresh Raspberry Pi OS, Ubuntu, or Debian system, you can install OpenDeploy directly without cloning or pre-downloading any files[cite: 1]. Run this command as root:
+For a fresh Raspberry Pi OS, Ubuntu, or Debian system, you can install OpenDeploy directly without cloning or pre-downloading any files. Run this command as root:
 
-`curl -fsSL https://raw.githubusercontent.com/Harshit-Patel01/WebEl/main/scripts/install.sh | sudo bash`
+```bash
+curl -fsSL https://raw.githubusercontent.com/Harshit-Patel01/WebEl/main/scripts/install.sh | sudo bash
+```
 
 The automated installer performs the following actions:
-* Detects your OS and CPU architecture[cite: 1].
-* Installs required `apt` packages, including nginx, NetworkManager, hostapd, dnsmasq, Avahi, git, python3, iptables, and LXD[cite: 1].
-* Initializes LXD using `lxd init --auto` if it is not already configured[cite: 1].
-* Downloads and installs the OpenDeploy binary, default configuration, and the systemd unit[cite: 1].
-* Configures nginx to proxy port 80 to the dashboard, matching `webel.local`, specific device hostnames, and direct IP addresses[cite: 1].
-* Enables auto-start on boot and prints a dependency health checklist[cite: 1].
+* Detects your OS and CPU architecture.
+* Installs required `apt` packages, including nginx, NetworkManager, hostapd, dnsmasq, Avahi, git, python3, iptables, and LXD.
+* Initializes LXD using `lxd init --auto` if it is not already configured.
+* Downloads and installs the OpenDeploy binary, default configuration, and the systemd unit.
+* Configures nginx to proxy port 80 to the dashboard, matching `webel.local`, specific device hostnames, and direct IP addresses.
+* Enables auto-start on boot and prints a dependency health checklist.
 
 ### Advanced Installation Options
-The installer script supports optional flags for local development or custom builds[cite: 1]:
+The installer script supports optional flags for local development or custom builds:
 
-`sudo ./scripts/install.sh --binary ./backend/opendeploy-linux-arm64`
-`sudo ./scripts/install.sh --from-source`
-`sudo ./scripts/install.sh --repo Harshit-Patel01/WebEl`
-`OPENDEPLOY_VERSION=v1.2.0 ... | sudo bash`
+```bash
+sudo ./scripts/install.sh --binary ./backend/opendeploy-linux-arm64
+sudo ./scripts/install.sh --from-source
+sudo ./scripts/install.sh --repo Harshit-Patel01/WebEl
+OPENDEPLOY_VERSION=v1.2.0 ... | sudo bash
+```
 
 ### Manual Installation
-If dependencies are already installed on the system, you can set up OpenDeploy manually[cite: 1]. With the matching binary present on the device, run:
+If dependencies are already installed on the system, you can set up OpenDeploy manually. With the matching binary present on the device, run:
 
-`sudo make -C backend install`
-`sudo systemctl start opendeploy`
+```bash
+sudo make -C backend install
+sudo systemctl start opendeploy
+```
 
-Alternatively, to copy the files manually[cite: 1]:
+Alternatively, to copy the files manually:
 
-`sudo install -m 755 opendeploy-linux-arm64 /usr/local/bin/opendeploy`
-`sudo mkdir -p /etc/opendeploy /var/lib/opendeploy /var/log/opendeploy`
-`sudo cp backend/config.example.yaml /etc/opendeploy/config.yaml`
-`sudo cp backend/opendeploy.service /etc/systemd/system/opendeploy.service`
-`sudo systemctl daemon-reload`
-`sudo systemctl enable --now opendeploy`
+```bash
+sudo install -m 755 opendeploy-linux-arm64 /usr/local/bin/opendeploy
+sudo mkdir -p /etc/opendeploy /var/lib/opendeploy /var/log/opendeploy
+sudo cp backend/config.example.yaml /etc/opendeploy/config.yaml
+sudo cp backend/opendeploy.service /etc/systemd/system/opendeploy.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now opendeploy
+```
 
 ## Usage Guidelines
 
-OpenDeploy runs as root via systemd, which allows it to properly manage WiFi, nginx, and LXD[cite: 1]. 
+OpenDeploy runs as root via systemd, which allows it to properly manage WiFi, nginx, and LXD. 
 
 ### Accessing the Dashboard
-Once installed, the installer will print three URLs, allowing you to access the dashboard via the following methods[cite: 1]:
-* **mDNS (fixed name):** `http://webel.local`[cite: 1].
-* **mDNS (device hostname):** `http://<hostname>.local`[cite: 1].
-* **Direct IP:** `http://<device-ip>`[cite: 1].
+Once installed, the installer will print three URLs, allowing you to access the dashboard via the following methods:
+* **mDNS (fixed name):** `http://webel.local`.
+* **mDNS (device hostname):** `http://<hostname>.local`.
+* **Direct IP:** `http://<device-ip>`.
 
 ### WiFi Hotspot Feature
-When the device is not connected to a network, OpenDeploy broadcasts a WiFi hotspot to provide immediate access to the dashboard[cite: 1].
-* **SSID:** `webel`[cite: 1].
-* **Password:** `webel123`[cite: 1].
-* **Hotspot Dashboard URL:** `http://webel.local` (nginx routes port 80 traffic to the dashboard)[cite: 1].
+When the device is not connected to a network, OpenDeploy broadcasts a WiFi hotspot to provide immediate access to the dashboard.
+* **SSID:** `webel`.
+* **Password:** `webel123`.
+* **Hotspot Dashboard URL:** `http://webel.local` (nginx routes port 80 traffic to the dashboard).
 
 ## Development and Building
 
 ### Running the Project Locally
-To run the frontend[cite: 1]:
-`cd frontend`
-`npm install`
-`npm run dev`
+To run the frontend:
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-To run the backend[cite: 1]:
-`cd backend`
-`go run ./cmd/opendeploy --config config.example.yaml`
+To run the backend:
+```bash
+cd backend
+go run ./cmd/opendeploy --config config.example.yaml
+```
 
 ### Building a Release Binary
-The frontend operates as a static Next.js export, meaning `npm run build` writes the embedded assets directly into the Go source tree without needing a manual copy step[cite: 1].
+The frontend operates as a static Next.js export, meaning `npm run build` writes the embedded assets directly into the Go source tree without needing a manual copy step.
 
-The most straightforward way to produce a release binary is via the provided Makefile, which handles the frontend build and cross-compilation simultaneously[cite: 1]:
+The most straightforward way to produce a release binary is via the provided Makefile, which handles the frontend build and cross-compilation simultaneously:
 
-`make -C backend build-release`
-`make -C backend build-linux-amd64`
-`make -C backend build-linux-arm`
-`make -C backend build-linux-386`
-`make -C backend build-all`
+```bash
+make -C backend build-release
+make -C backend build-linux-amd64
+make -C backend build-linux-arm
+make -C backend build-linux-386
+make -C backend build-all
+```
 
-To build the project manually without utilizing Make[cite: 1]:
+To build the project manually without utilizing Make:
 
-`cd frontend && npm install && npm run build`
-`cd ../backend`
-`env GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o opendeploy-linux-arm64 ./cmd/opendeploy`
+```bash
+cd frontend && npm install && npm run build
+cd ../backend
+env GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o opendeploy-linux-arm64 ./cmd/opendeploy
+```
