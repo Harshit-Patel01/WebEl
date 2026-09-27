@@ -1,6 +1,7 @@
 [Unit]
 Description=opendeploy Hosting Dashboard
-After=local-fs.target avahi-daemon.service
+After=local-fs.target network-online.target avahi-daemon.service NetworkManager.service
+Wants=network-online.target avahi-daemon.service
 
 [Service]
 Type=simple
@@ -16,7 +17,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=opendeploy
 
-Environment=opendeploy_ENV=production
+Environment=OPENDEPLOY_ENV=production
 Environment=GODEBUG=netdns=go
 
 [Install]

@@ -28,10 +28,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .pnpm-store/
-package-lock.json
 yarn.lock
 LXC_CHANGES.md
 pnpm-lock.yaml
+
+# Keep package-lock.json tracked so `npm ci` / Makefile build-frontend is reproducible.
+# (Do not ignore package-lock.json.)
 
 # Next.js
 .next/

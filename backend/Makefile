@@ -29,10 +29,13 @@ build-linux-386:
 build-release: build-frontend build-linux-arm64
 	@echo "Release binary: $(BINARY_NAME)-linux-arm64"
 
+# next.config.js sets distDir to ../backend/static/frontend (static export)
 build-frontend:
-	cd ../frontend && npm ci && npm run build
-	rm -rf static/frontend
-	cp -r ../frontend/.next/static static/frontend 2>/dev/null || cp -r ../frontend/out static/frontend 2>/dev/null || true
+	cd ../frontend && \
+		if [ -f package-lock.json ]; then npm ci; else npm install; fi && \
+		npm run build
+	@test -f static/frontend/index.html || test -d static/frontend/_next || \
+		(echo "Frontend export missing under static/frontend — check next.config.js distDir"; exit 1)
 
 # Dev mode: run with live reload (requires air)
 dev:
@@ -42,14 +45,37 @@ clean:
 	rm -f $(BINARY_NAME) $(BINARY_NAME)-linux-*
 	rm -rf static/frontend
 
-# Install on the target system
+# Detect host arch for install (matches scripts/install.sh)
+HOST_ARCH := $(shell uname -m)
+ifeq ($(HOST_ARCH),aarch64)
+  INSTALL_SUFFIX := linux-arm64
+else ifeq ($(HOST_ARCH),arm64)
+  INSTALL_SUFFIX := linux-arm64
+else ifeq ($(HOST_ARCH),x86_64)
+  INSTALL_SUFFIX := linux-amd64
+else ifeq ($(HOST_ARCH),armv7l)
+  INSTALL_SUFFIX := linux-armv7
+else ifeq ($(HOST_ARCH),i686)
+  INSTALL_SUFFIX := linux-386
+else
+  INSTALL_SUFFIX := linux-$(HOST_ARCH)
+endif
+
+# Install on the target system (runs as root — matches opendeploy.service User=root)
+# Prefer scripts/install.sh for full OS dependency bootstrap.
 install:
-	install -m 755 $(BINARY_NAME)-linux-arm64 /usr/local/bin/opendeploy
+	@test -f $(BINARY_NAME)-$(INSTALL_SUFFIX) || test -f $(BINARY_NAME) || \
+		(echo "Missing binary $(BINARY_NAME)-$(INSTALL_SUFFIX). Run: make build-linux-arm64|build-linux-amd64|build-linux-arm|build-linux-386 or make build"; exit 1)
+	@if [ -f $(BINARY_NAME)-$(INSTALL_SUFFIX) ]; then \
+		install -m 755 $(BINARY_NAME)-$(INSTALL_SUFFIX) /usr/local/bin/opendeploy; \
+	else \
+		install -m 755 $(BINARY_NAME) /usr/local/bin/opendeploy; \
+	fi
 	install -m 644 opendeploy.service /etc/systemd/system/opendeploy.service
-	mkdir -p /etc/opendeploy /var/lib/opendeploy /var/log/opendeploy
+	mkdir -p /etc/opendeploy /var/lib/opendeploy /var/log/opendeploy /var/www/opendeploy
 	test -f /etc/opendeploy/config.yaml || install -m 644 config.example.yaml /etc/opendeploy/config.yaml
-	id -u opendeploy &>/dev/null || useradd -r -s /sbin/nologin opendeploy
-	chown -R opendeploy:opendeploy /var/lib/opendeploy /var/log/opendeploy
+	chown -R root:root /var/lib/opendeploy /var/log/opendeploy /etc/opendeploy
 	systemctl daemon-reload
 	systemctl enable opendeploy
-	@echo "Installed. Start with: systemctl start opendeploy"
+	@echo "Installed ($(INSTALL_SUFFIX)). Start with: systemctl start opendeploy"
+	@echo "For full Pi bootstrap (apt deps + LXD): sudo ../scripts/install.sh --binary /usr/local/bin/opendeploy"

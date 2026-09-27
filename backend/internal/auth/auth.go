@@ -10,9 +10,11 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/opendeploy/opendeploy/internal/state"
-	"golang.org/x/crypto/bcrypt"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 )
+
+const jwtSecretKey = "jwt_secret"
 
 type Auth struct {
 	db              *state.DB
@@ -28,9 +30,7 @@ type Claims struct {
 }
 
 func New(db *state.DB, sessionDuration time.Duration, bcryptCost int, lanOnly bool, logger *zap.Logger) *Auth {
-	// Generate a random JWT secret on each start
-	secret := make([]byte, 32)
-	rand.Read(secret)
+	secret := loadOrCreateJWTSecret(db, logger)
 
 	return &Auth{
 		db:              db,
@@ -40,6 +40,35 @@ func New(db *state.DB, sessionDuration time.Duration, bcryptCost int, lanOnly bo
 		lanOnly:         lanOnly,
 		logger:          logger,
 	}
+}
+
+// loadOrCreateJWTSecret persists the signing key in setup_state so sessions
+// survive process restarts and reboots.
+func loadOrCreateJWTSecret(db *state.DB, logger *zap.Logger) []byte {
+	stored, err := db.GetSetupState(jwtSecretKey)
+	if err == nil && stored != "" {
+		if decoded, decErr := hex.DecodeString(stored); decErr == nil && len(decoded) >= 32 {
+			return decoded
+		}
+		// Legacy / non-hex values: use raw bytes if long enough
+		if len(stored) >= 32 {
+			return []byte(stored)
+		}
+		if logger != nil {
+			logger.Warn("stored jwt_secret is invalid; generating a new one")
+		}
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		// Extremely unlikely; fall back to a non-crypto placeholder so boot continues
+		raw = []byte("opendeploy-insecure-fallback-secret!!")
+	}
+	encoded := hex.EncodeToString(raw)
+	if err := db.SetSetupState(jwtSecretKey, encoded); err != nil && logger != nil {
+		logger.Warn("failed to persist jwt_secret; sessions will not survive restart", zap.Error(err))
+	}
+	return raw
 }
 
 func (a *Auth) IsPasswordSet() bool {

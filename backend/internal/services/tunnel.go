@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -63,16 +64,19 @@ func (t *TunnelService) ensureCloudflaredInstalled(ctx context.Context) error {
 	}
 
 	// cloudflared not found, install it
-	t.logger.Info("cloudflared not found, installing...")
+	cfArch, err := cloudflaredArch()
+	if err != nil {
+		return err
+	}
+	t.logger.Info("cloudflared not found, installing...", zap.String("arch", cfArch))
 
-	// Download and install cloudflared
-	// For Linux AMD64
-	installScript := `
+	asset := "cloudflared-linux-" + cfArch
+	installScript := fmt.Sprintf(`
 		cd /tmp && \
-		wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && \
-		sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared && \
+		wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/%s && \
+		sudo mv %s /usr/local/bin/cloudflared && \
 		sudo chmod +x /usr/local/bin/cloudflared
-	`
+	`, asset, asset)
 
 	result, err = t.runner.Run(ctx, exec.RunOpts{
 		JobType: "install_cloudflared",
@@ -91,6 +95,22 @@ func (t *TunnelService) ensureCloudflaredInstalled(ctx context.Context) error {
 
 	t.logger.Info("cloudflared installed successfully")
 	return nil
+}
+
+// cloudflaredArch maps Go's GOARCH to Cloudflare's release asset suffix.
+func cloudflaredArch() (string, error) {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "amd64", nil
+	case "arm64":
+		return "arm64", nil
+	case "arm":
+		return "arm", nil
+	case "386":
+		return "386", nil
+	default:
+		return "", fmt.Errorf("unsupported architecture for cloudflared: %s", runtime.GOARCH)
+	}
 }
 
 // SetupTunnel implements the complete API-based tunnel setup flow
