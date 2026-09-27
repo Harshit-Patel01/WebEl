@@ -109,10 +109,20 @@ make -C backend build-linux-386
 make -C backend build-all
 ```
 
-To build the project manually without utilizing Make:
+To build the project manually without utilizing Make (e.g., on Linux/macOS):
 
 ```bash
 cd frontend && npm install && npm run build
 cd ../backend
 env GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o opendeploy-linux-arm64 ./cmd/opendeploy
+```
+
+### Building on Windows
+If you are developing on Windows (where `make` is not available by default), we have provided a PowerShell script that mimics the Makefile:
+
+```powershell
+cd backend
+.\build.ps1 build-release    # Builds frontend and arm64 binary
+.\build.ps1 build-all        # Builds for all Linux architectures
+.\build.ps1 build-linux-amd64
 ```
