@@ -576,8 +576,8 @@ export default function SettingsPage() {
                   <h2 className="font-serif text-h2 mb-6">About OpenDeploy</h2>
                   <div className="space-y-4 font-mono text-small">
                     {[
-                      ['Version', '1.0.0'],
-                      ['Build', '2026.09.27-b01'],
+                      ['Version', '1.0.9'],
+                      ['Build', '2026.09.29-b01'],
                       ['License', 'MIT'],
                       ['Author', 'Harshit Singh Patel'],
                     ].map(([label, value]) => (
