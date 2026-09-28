@@ -295,6 +295,28 @@ export const nginxApi = {
   }),
 }
 
+// Events API
+export const eventsApi = {
+  getEvents: (lines?: number) => fetchApi<{
+    events: {
+      id: string;
+      ts: string;
+      level: string;
+      source: string;
+      event: string;
+      message: string;
+      summary?: string;
+    }[];
+    stats: {
+      total: number;
+      errors: number;
+      warnings: number;
+      success: number;
+      info: number;
+    }
+  }>(`/logs/events${lines ? `?lines=${lines}` : ''}`)
+}
+
 // Services API
 export const servicesApi = {
   list: () => fetchApi<{ name: string; status: string; uptime?: string }[]>('/services'),

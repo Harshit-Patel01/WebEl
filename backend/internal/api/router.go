@@ -48,6 +48,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	nginxSvc := services.NewNginxService(runner, cfg.Nginx, logger)
 	systemSvc := services.NewSystemService(runner, logger)
 	internetSvc := services.NewInternetService(runner, logger)
+	eventSvc := services.NewEventService(systemSvc, nginxSvc)
 	containerSvc := services.NewContainerService(runner, db, cfg.Deploy, logger)
 	lxdSvc := services.NewLXDService(runner, cfg.Deploy, db, logger)
 	cleanupSvc := services.NewCleanupService(runner, db, cfg.Deploy, logger)
@@ -78,6 +79,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	nginxH := &nginxHandlers{service: nginxSvc, db: db}
 	systemH := &systemHandlers{service: systemSvc, db: db}
 	servicesH := &servicesHandlers{system: systemSvc, runner: runner}
+	eventsH := &eventsHandlers{eventSvc: eventSvc}
 	jobH := &jobHandlers{db: db, runner: runner}
 	envH := &envHandlers{db: db}
 	internetH := &internetHandlers{service: internetSvc}
@@ -162,6 +164,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Post("/nginx/test", nginxH.testConfig)
 			r.Post("/nginx/reload", nginxH.reload)
 			r.Get("/nginx/logs", nginxH.getLogs)
+			r.Get("/logs/events", eventsH.getEvents)
 
 			// Nginx file management
 			r.Get("/nginx/files", nginxH.listConfigFiles)
