@@ -38,8 +38,8 @@ type WifiNetwork = {
 
 type WifiStatus = {
   connected: boolean
-  ssid: string
-  ip: string
+  ssid?: string
+  ip?: string
   state: string
 }
 
@@ -116,7 +116,7 @@ export default function WifiPage() {
     } else if (lastMessage.type === 'wifi_connecting') {
       // Connection progress update
       if (lastMessage.message) {
-        setConnectionLogs(prev => [...prev, lastMessage.message])
+        setConnectionLogs(prev => [...prev, lastMessage.message as string])
       }
     }
   }, [lastMessage])

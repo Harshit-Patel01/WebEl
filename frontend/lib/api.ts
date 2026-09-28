@@ -267,7 +267,15 @@ export const nginxApi = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  getAccessLogs: (lines?: number) => fetchApi<{ timestamp: string; level: string; message: string }[]>(`/nginx/logs${lines ? `?lines=${lines}` : ''}`),
+  getAccessLogs: (lines?: number) => fetchApi<{
+    ip: string;
+    timestamp: string;
+    method: string;
+    path: string;
+    status: number;
+    response_size: number;
+    duration: string;
+  }[]>(`/nginx/logs${lines ? `?lines=${lines}` : ''}`),
 
   // File management
   listFiles: () => fetchApi<{ name: string; enabled: boolean; size: number }[]>('/nginx/files'),

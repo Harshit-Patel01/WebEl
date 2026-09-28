@@ -1,5 +1,5 @@
 param (
-    [string]$Target = "build-release"
+    [string]$Target = "build-all"
 )
 
 $BINARY_NAME = "opendeploy"
@@ -27,17 +27,18 @@ function Build-Binary {
     if ($goos -eq "windows") { $outputName += ".exe" }
     
     go build -ldflags="$LDFLAGS" -o $outputName ./cmd/opendeploy
-    
+    Write-Host "Built binary: $outputName"
     Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
     Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
     Remove-Item Env:\GOARM -ErrorAction SilentlyContinue
 }
 
 function Build-Frontend {
-    Write-Host "Building frontend..."
     Set-Location ../frontend
-    npm install
-    npm run build
+    Write-Host "Installing dependencies..."
+    cmd /c "npm install"
+    Write-Host "Building frontend..."
+    cmd /c "npm run build"
     Set-Location ../backend
 }
 
