@@ -98,6 +98,14 @@ func (h *authHandlers) logout(w http.ResponseWriter, r *http.Request) {
 	respondOK(w, map[string]string{"status": "logged_out"})
 }
 
+func (h *authHandlers) completeOnboarding(w http.ResponseWriter, r *http.Request) {
+	if err := h.auth.MarkOnboardingComplete(); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(w, map[string]string{"status": "onboarding_complete"})
+}
+
 func (h *authHandlers) status(w http.ResponseWriter, r *http.Request) {
 	authenticated := false
 	// Check if user has a valid session cookie
@@ -117,8 +125,9 @@ func (h *authHandlers) status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondOK(w, map[string]interface{}{
-		"password_set":  h.auth.IsPasswordSet(),
-		"authenticated": authenticated,
+		"password_set":        h.auth.IsPasswordSet(),
+		"authenticated":       authenticated,
+		"onboarding_complete": h.auth.IsOnboardingComplete(),
 	})
 }
 

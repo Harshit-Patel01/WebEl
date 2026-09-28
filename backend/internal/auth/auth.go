@@ -16,6 +16,19 @@ import (
 
 const jwtSecretKey = "jwt_secret"
 
+// OnboardingCompleteKey records that the first-run wizard has been dismissed.
+// Stored in setup_state so the flag is scoped to the device, not the browser.
+const OnboardingCompleteKey = "onboarding_complete"
+
+func (a *Auth) IsOnboardingComplete() bool {
+	v, err := a.db.GetSetupState(OnboardingCompleteKey)
+	return err == nil && v == "true"
+}
+
+func (a *Auth) MarkOnboardingComplete() error {
+	return a.db.SetSetupState(OnboardingCompleteKey, "true")
+}
+
 type Auth struct {
 	db              *state.DB
 	jwtSecret       []byte

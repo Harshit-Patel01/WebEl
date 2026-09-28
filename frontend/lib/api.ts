@@ -62,7 +62,8 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  getStatus: () => fetchApi<{ password_set: boolean; authenticated: boolean }>('/auth/status'),
+  getStatus: () => fetchApi<{ password_set: boolean; authenticated: boolean; onboarding_complete: boolean }>('/auth/status'),
+  completeOnboarding: () => fetchApi<{ status: string }>('/auth/onboarding/complete', { method: 'POST' }),
   logout: () => fetchApi<{ status: string }>('/auth/logout', { method: 'POST' }),
 }
 

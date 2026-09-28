@@ -101,6 +101,7 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 			r.Post("/auth/login", authH.login)
 			r.Post("/auth/setup", authH.setupPassword)
 			r.Get("/auth/status", authH.status)
+			r.Post("/auth/onboarding/complete", authH.completeOnboarding)
 			// logout just clears the cookie — safe even if unauthenticated
 			r.Post("/auth/logout", authH.logout)
 			// change-password self-validates via current_password in body

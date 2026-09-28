@@ -2,8 +2,21 @@
 
 import { motion } from 'framer-motion'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { authApi } from '@/lib/api'
 
 export default function WelcomePage() {
+  const router = useRouter()
+
+  const beginSetup = async () => {
+    try {
+      await authApi.completeOnboarding()
+    } catch {
+      // flag is advisory; proceed into the wizard regardless
+    }
+    router.push('/wifi')
+  }
+
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col items-center justify-center relative overflow-hidden dot-pattern">
       <div className="max-w-3xl mx-auto text-center px-6 relative z-10">
@@ -52,12 +65,12 @@ export default function WelcomePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 1.2 }}
         >
-          <Link
-            href="/wifi"
+          <button
+            onClick={beginSetup}
             className="inline-flex items-center gap-2 px-8 py-4 bg-accent-lime text-text-dark font-mono font-bold text-body uppercase tracking-wider  hover:bg-accent-lime-muted transition-all hover:shadow-[0_0_30px_rgba(170,255,69,0.3)] active:scale-95"
           >
             Begin Setup <span className="text-xl">&rarr;</span>
-          </Link>
+          </button>
         </motion.div>
       </div>
 

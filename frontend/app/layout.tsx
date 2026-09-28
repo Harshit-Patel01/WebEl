@@ -100,6 +100,7 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
     setError('')
     try {
       await authApi.setupPassword(password)
+      await authApi.completeOnboarding()
       onComplete()
       router.push('/dashboard')
     } catch (err: any) {
@@ -109,8 +110,13 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
     }
   }
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
     localStorage.setItem('opendeploy_setup_skipped', 'true')
+    try {
+      await authApi.completeOnboarding()
+    } catch {
+      // onboarding flag is advisory; local state still advances
+    }
     onComplete()
     router.push('/dashboard')
   }
@@ -191,11 +197,13 @@ export default function RootLayout({
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [authState, setAuthState] = useState<AuthState>('loading')
+  const [onboardingComplete, setOnboardingComplete] = useState(false)
 
   // Check auth status on mount
   const checkAuth = useCallback(async () => {
     try {
       const status = await authApi.getStatus()
+      setOnboardingComplete(status.onboarding_complete)
 
       if (!status.password_set) {
         const skipped = localStorage.getItem('opendeploy_setup_skipped')
@@ -228,15 +236,12 @@ export default function RootLayout({
     return () => window.removeEventListener('opendeploy-logout', handleLogout)
   }, [])
 
-  // Redirect / to /dashboard for authenticated users
+  // Redirect / to /dashboard once the first-run flow has been dismissed
   useEffect(() => {
-    if (authState === 'authenticated' && isWelcomePage) {
-      const setupCompleted = localStorage.getItem('opendeploy_setup_completed')
-      if (setupCompleted === 'true') {
-        router.replace('/dashboard')
-      }
+    if (authState === 'authenticated' && isWelcomePage && onboardingComplete) {
+      router.replace('/dashboard')
     }
-  }, [authState, isWelcomePage, router])
+  }, [authState, isWelcomePage, onboardingComplete, router])
 
   // Load sidebar state from localStorage
   useEffect(() => {

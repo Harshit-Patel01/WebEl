@@ -48,3 +48,32 @@ func TestJWTSecretPersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("token from first instance should validate on second instance")
 	}
 }
+
+func TestOnboardingFlagPersistsAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.db")
+
+	db, err := state.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	a := New(db, time.Hour, 10, false, zap.NewNop())
+
+	if a.IsOnboardingComplete() {
+		t.Fatal("onboarding should start incomplete on a fresh install")
+	}
+	if err := a.MarkOnboardingComplete(); err != nil {
+		t.Fatalf("MarkOnboardingComplete: %v", err)
+	}
+	db.Close()
+
+	db2, err := state.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("reopen NewDB: %v", err)
+	}
+	defer db2.Close()
+
+	if !New(db2, time.Hour, 10, false, zap.NewNop()).IsOnboardingComplete() {
+		t.Fatal("onboarding flag should survive restart")
+	}
+}
