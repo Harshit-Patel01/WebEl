@@ -121,7 +121,12 @@ env GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o opendeploy-linux-arm64 
 If you are developing on Windows (where `make` is not available by default), we have provided a PowerShell script that mimics the Makefile:
 
 ```powershell
-.\scripts\build.ps1 build-release    # Builds frontend and arm64 binary
-.\scripts\build.ps1 build-all        # Builds for all Linux architectures
+.\scripts\build.ps1                  # Default (build-all): frontend + all four Linux binaries
+.\scripts\build.ps1 build-release    # Alias of build-all, prints the release artifact summary
+.\scripts\build.ps1 build-frontend   # Frontend only (refreshes backend/static/frontend)
 .\scripts\build.ps1 build-linux-amd64
 ```
+
+The script checks every step and verifies `backend/static/frontend` byte-for-byte against
+`frontend/out` before compiling, so a failed frontend build stops the script instead of
+producing a binary with a stale (or missing) embedded frontend.
