@@ -141,7 +141,7 @@ if strings.Contains(msgLower, "pam_unix(sudo:session)") ||
 		}
 	}
 
-	fetchAndNormalize("opendeploy", "APP")
+	fetchAndNormalize("opendeploy", "SYSTEM")
 	fetchAndNormalize("nginx", "NGINX")
 	fetchAndNormalize("cloudflared", "CLOUDFLARED")
 	
