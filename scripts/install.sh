@@ -429,10 +429,19 @@ write_nginx_config() {
   _tmp_conf="$(mktemp)"
 
   cat > "${_tmp_conf}" <<'NGINX'
+# Drop connections for unknown domains (catch-all)
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    server_name __SERVER_NAMES__ _;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    # Allow specific hostnames, localhost, IPv4, and IPv6 addresses
+    server_name __SERVER_NAMES__ localhost 127.0.0.1 ~^[0-9\.]+$ ~^\[[a-fA-F0-9:]+\]$;
 
     access_log  /var/log/nginx/opendeploy-access.log;
     error_log   /var/log/nginx/opendeploy-error.log;
