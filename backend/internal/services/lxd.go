@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -282,7 +283,7 @@ func (l *LXDService) EnsureLXDInitialized(ctx context.Context) error {
 	})
 
 	if err != nil || !initResult.Success {
-		return fmt.Errorf("failed to initialize LXD: %w", err)
+		return commandFailure("failed to initialize LXD", initResult, err)
 	}
 
 	l.initialized = true
@@ -298,6 +299,46 @@ type ContainerInfo struct {
 	HostPort      int
 	ContainerPort int
 	Status        string
+}
+
+// commandFailure renders a runner result as an error that names the command,
+// its exit code, and its output. The runner returns a nil error for non-zero
+// exits, so wrapping that error with %w alone yields a bare "%!w(<nil>)" and
+// discards the one line that says what actually went wrong.
+func commandFailure(action string, result *exec.ExecResult, err error) error {
+	msg := fmt.Sprintf("%s", action)
+	if err != nil {
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+	if result == nil {
+		return fmt.Errorf("%s: no result returned", msg)
+	}
+
+	exit := result.ExitCode
+	if exit == 0 {
+		// Exit code unknown (process killed or pipe failure) — use a sentinel.
+		exit = -1
+	}
+	msg = fmt.Sprintf("%s (exit code %d)", msg, exit)
+
+	if result.Error != "" {
+		msg += ": " + result.Error
+	}
+
+	var out []string
+	for _, line := range result.Lines {
+		if s := strings.TrimSpace(line.Text); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) > 0 {
+		if len(out) > 20 {
+			out = append(out[:20], fmt.Sprintf("... and %d more lines", len(result.Lines)-20))
+		}
+		msg += "\n" + strings.Join(out, "\n")
+	}
+
+	return errors.New(msg)
 }
 
 // CreateContainerWithUserDataAndFramework creates an LXD container using pre-built images when available
@@ -364,7 +405,7 @@ func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context
 	})
 
 	if initErr != nil || (initResult != nil && !initResult.Success) {
-		return nil, fmt.Errorf("failed to init container: %w", initErr)
+		return nil, commandFailure(fmt.Sprintf("failed to init container from image %s", image), initResult, initErr)
 	}
 
 	containerID := containerName
@@ -406,7 +447,7 @@ func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context
 	})
 
 	if startErr != nil || (startResult != nil && !startResult.Success) {
-		return nil, fmt.Errorf("failed to start container: %w", startErr)
+		return nil, commandFailure("failed to start container", startResult, startErr)
 	}
 
 	// Wait for container to be ready and get network
@@ -427,18 +468,7 @@ func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context
 		})
 
 		if setupErr != nil || (setupResult != nil && !setupResult.Success) {
-			var allOutput string
-			if setupResult != nil {
-				for _, line := range setupResult.Lines {
-					allOutput += fmt.Sprintf("[%s] %s\n", line.Stream, line.Text)
-				}
-			}
-			return nil, fmt.Errorf("container setup failed (exit code: %d):\n%s(error: %v)", func() int {
-				if setupResult != nil {
-					return setupResult.ExitCode
-				}
-				return -1
-			}(), allOutput, setupErr)
+			return nil, commandFailure("container setup failed", setupResult, setupErr)
 		}
 
 		l.logger.Info("container setup completed", zap.String("containerId", containerID))
@@ -479,7 +509,7 @@ func (l *LXDService) GetContainerStatus(ctx context.Context, containerID string)
 	})
 
 	if err != nil || !result.Success {
-		return "unknown", fmt.Errorf("failed to get container info: %w", err)
+		return "unknown", commandFailure("failed to get container info", result, err)
 	}
 
 	// Parse status from JSON output

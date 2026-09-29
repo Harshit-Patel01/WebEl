@@ -61,25 +61,26 @@ func (ib *ImageBuilder) EnsureImage(ctx context.Context, imageType ImageType) er
 	tempContainer := fmt.Sprintf("temp-build-%s-%d", imageType, time.Now().Unix())
 
 	// Initialize container
-	_, err := ib.runner.Run(ctx, exec.RunOpts{
+	initResult, err := ib.runner.Run(ctx, exec.RunOpts{
 		JobType: "init_temp_container",
 		Command: "lxc",
 		Args:    []string{"init", "images:alpine/3.23", tempContainer},
 		Timeout: 60 * time.Second,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to init temp container: %w", err)
+	if err != nil || !initResult.Success {
+		return commandFailure("failed to init temp container", initResult, err)
 	}
 
 	// Start container
-	_, err = ib.runner.Run(ctx, exec.RunOpts{
+	startResult, err := ib.runner.Run(ctx, exec.RunOpts{
 		JobType: "start_temp_container",
 		Command: "lxc",
 		Args:    []string{"start", tempContainer},
 		Timeout: 30 * time.Second,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to start temp container: %w", err)
+	if err != nil || !startResult.Success {
+		ib.cleanupTempContainer(ctx, tempContainer)
+		return commandFailure("failed to start temp container", startResult, err)
 	}
 
 	// Wait for network
@@ -87,39 +88,39 @@ func (ib *ImageBuilder) EnsureImage(ctx context.Context, imageType ImageType) er
 
 	// Run setup script based on image type
 	setupScript := ib.getSetupScript(imageType)
-	_, err = ib.runner.Run(ctx, exec.RunOpts{
+	setupResult, err := ib.runner.Run(ctx, exec.RunOpts{
 		JobType: "run_setup_script",
 		Command: "lxc",
 		Args:    []string{"exec", tempContainer, "--", "/bin/sh", "-c", setupScript},
 		Timeout: 15 * time.Minute,
 	})
-	if err != nil {
+	if err != nil || !setupResult.Success {
 		ib.cleanupTempContainer(ctx, tempContainer)
-		return fmt.Errorf("failed to run setup script: %w", err)
+		return commandFailure("failed to run setup script", setupResult, err)
 	}
 
 	// Stop container
-	_, err = ib.runner.Run(ctx, exec.RunOpts{
+	stopResult, err := ib.runner.Run(ctx, exec.RunOpts{
 		JobType: "stop_temp_container",
 		Command: "lxc",
 		Args:    []string{"stop", tempContainer},
 		Timeout: 30 * time.Second,
 	})
-	if err != nil {
+	if err != nil || !stopResult.Success {
 		ib.cleanupTempContainer(ctx, tempContainer)
-		return fmt.Errorf("failed to stop temp container: %w", err)
+		return commandFailure("failed to stop temp container", stopResult, err)
 	}
 
 	// Publish as image
-	_, err = ib.runner.Run(ctx, exec.RunOpts{
+	publishResult, err := ib.runner.Run(ctx, exec.RunOpts{
 		JobType: "publish_image",
 		Command: "lxc",
 		Args:    []string{"publish", tempContainer, imageName, "--alias", imageName},
 		Timeout: 2 * time.Minute,
 	})
-	if err != nil {
+	if err != nil || !publishResult.Success {
 		ib.cleanupTempContainer(ctx, tempContainer)
-		return fmt.Errorf("failed to publish image: %w", err)
+		return commandFailure("failed to publish image "+imageName, publishResult, err)
 	}
 
 	// Cleanup temp container
