@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -375,15 +376,20 @@ func (n *NginxService) WriteConfigFile(name, content string) error {
 	// Write to temp file first, then rename (atomic)
 	tmpPath := availablePath + ".tmp"
 	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
-		// Try with sudo
-		_, sudoErr := n.runner.Run(context.Background(), exec.RunOpts{
+		// Try with sudo. Run has no stdin, so `tee` would truncate the temp file
+		// and then rename an empty config over the live one — use sh -c with the
+		// content on stdin via RunWithStdin instead.
+		res, sudoErr := n.runner.RunWithStdin(context.Background(), exec.RunOpts{
 			JobType: "nginx_write_config",
 			Command: "/usr/bin/sudo",
 			Args:    []string{"/usr/bin/tee", tmpPath},
 			Timeout: 10 * time.Second,
-		})
+		}, strings.NewReader(content))
 		if sudoErr != nil {
 			return fmt.Errorf("writing config file: %w", err)
+		}
+		if !res.Success {
+			return fmt.Errorf("writing config file via sudo: %w", errors.New(res.Error))
 		}
 	}
 

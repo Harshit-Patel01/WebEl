@@ -110,8 +110,18 @@ func (c *Client) WritePump() {
 	}
 }
 
-// ServeWS handles WebSocket requests from clients.
-func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request) {
+// AuthorizeFunc reports whether a request may open a socket. Browsers cannot
+// set headers on a WebSocket handshake, so the session cookie carries auth.
+type AuthorizeFunc func(*http.Request) bool
+
+// ServeWS handles WebSocket requests from clients. A nil or failing authorize
+// closes the connection: every broadcast carries job logs and system stats.
+func ServeWS(hub *Hub, w http.ResponseWriter, r *http.Request, authorize AuthorizeFunc) {
+	if authorize == nil || !authorize(r) {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		hub.logger.Error("ws upgrade failed", zap.Error(err))

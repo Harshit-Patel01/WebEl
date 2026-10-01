@@ -10,8 +10,10 @@ LDFLAGS=-s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildT
 build:
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/opendeploy
 
-# Build for all supported Linux architectures
-build-all: build-linux-arm64 build-linux-amd64 build-linux-arm build-linux-x86
+# Build for all supported Linux architectures.
+# build-frontend is a prerequisite, not optional: go:embed captures whatever is
+# in static/frontend at compile time, so skipping it ships the previous build's UI.
+build-all: build-frontend build-linux-arm64 build-linux-amd64 build-linux-arm build-linux-x86
 
 build-linux-arm64:
 	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux-arm64 ./cmd/opendeploy
@@ -29,13 +31,19 @@ build-linux-x86:
 build-release: build-frontend build-linux-arm64
 	@echo "Release binary: $(BINARY_NAME)-linux-arm64"
 
-# next.config.js sets distDir to ../backend/static/frontend (static export)
+# Rebuild everything from scratch and verify the embed actually has content.
+release: clean build-frontend build-all
+	@ls -la $(BINARY_NAME)-linux-* && echo "embedded frontend bytes: $$(du -sh static/frontend | cut -f1)"
+
+# Build the Next.js export and copy it into static/frontend for go:embed.
+# npm run build runs next build then frontend/scripts/sync-embed.cjs, which
+# wipes and repopulates backend/static/frontend from frontend/out.
 build-frontend:
 	cd ../frontend && \
 		if [ -f package-lock.json ]; then npm ci; else npm install; fi && \
 		npm run build
-	@test -f static/frontend/index.html || test -d static/frontend/_next || \
-		(echo "Frontend export missing under static/frontend — check next.config.js distDir"; exit 1)
+	@test -f static/frontend/index.html || \
+		(echo "Frontend export missing at static/frontend/index.html — npm run build must run sync-embed.cjs"; exit 1)
 
 # Dev mode: run with live reload (requires air)
 dev:

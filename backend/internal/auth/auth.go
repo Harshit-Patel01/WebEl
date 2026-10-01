@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -16,6 +18,14 @@ import (
 
 const jwtSecretKey = "jwt_secret"
 
+// minPasswordLength and maxLoginAttempts bound credential guessing. bcrypt cost
+// is tuned for a Pi, so a cheap limiter matters more here than on a server.
+const (
+	minPasswordLength = 8
+	maxLoginAttempts  = 5
+	loginLockout      = 2 * time.Minute
+)
+
 type Auth struct {
 	db              *state.DB
 	jwtSecret       []byte
@@ -23,6 +33,16 @@ type Auth struct {
 	bcryptCost      int
 	lanOnly         bool
 	logger          *zap.Logger
+
+	// loginMu guards loginFails. bcrypt at Pi cost is slow enough that without
+	// a limiter an unauthenticated client can pin the CPU with guesses.
+	loginMu    sync.Mutex
+	loginFails map[string]*loginAttempt
+}
+
+type loginAttempt struct {
+	count       int
+	lockedUntil time.Time
 }
 
 type Claims struct {
@@ -39,7 +59,48 @@ func New(db *state.DB, sessionDuration time.Duration, bcryptCost int, lanOnly bo
 		bcryptCost:      bcryptCost,
 		lanOnly:         lanOnly,
 		logger:          logger,
+		loginFails:      make(map[string]*loginAttempt),
 	}
+}
+
+// LoginAllowed reports whether another attempt from key is permitted right now.
+func (a *Auth) LoginAllowed(key string) bool {
+	a.loginMu.Lock()
+	defer a.loginMu.Unlock()
+
+	att, ok := a.loginFails[key]
+	if !ok {
+		return true
+	}
+	if time.Now().After(att.lockedUntil) {
+		delete(a.loginFails, key) // window elapsed, start clean
+		return true
+	}
+	return false
+}
+
+// RecordLoginFailure counts a failed attempt and locks the key once the limit is hit.
+func (a *Auth) RecordLoginFailure(key string) {
+	a.loginMu.Lock()
+	defer a.loginMu.Unlock()
+
+	att, ok := a.loginFails[key]
+	if !ok {
+		att = &loginAttempt{}
+		a.loginFails[key] = att
+	}
+	att.count++
+	if att.count >= maxLoginAttempts {
+		att.lockedUntil = time.Now().Add(loginLockout)
+		att.count = 0
+	}
+}
+
+// ClearLoginFailures resets the counter after a successful login.
+func (a *Auth) ClearLoginFailures(key string) {
+	a.loginMu.Lock()
+	defer a.loginMu.Unlock()
+	delete(a.loginFails, key)
 }
 
 // loadOrCreateJWTSecret persists the signing key in setup_state so sessions
@@ -77,8 +138,8 @@ func (a *Auth) IsPasswordSet() bool {
 }
 
 func (a *Auth) SetPassword(password string) error {
-	if len(password) < 6 {
-		return fmt.Errorf("password must be at least 6 characters")
+	if len(password) < minPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", minPasswordLength)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), a.bcryptCost)
 	if err != nil {
@@ -119,6 +180,34 @@ func (a *Auth) ValidateToken(tokenString string) bool {
 	return err == nil && token.Valid
 }
 
+// RotateJWTSecret replaces the signing key, invalidating every existing session.
+// Called after a password change so a session captured earlier cannot outlive it.
+func (a *Auth) RotateJWTSecret() error {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Errorf("generating jwt secret: %w", err)
+	}
+	if err := a.db.SetSetupState(jwtSecretKey, hex.EncodeToString(raw)); err != nil {
+		return fmt.Errorf("persisting jwt secret: %w", err)
+	}
+	a.jwtSecret = raw
+	return nil
+}
+
+// Authorize reports whether a request carries a valid session. Shared by the
+// HTTP middleware and the WebSocket upgrade, which browsers authenticate with
+// the same cookie.
+func (a *Auth) Authorize(r *http.Request) bool {
+	if cookie, err := r.Cookie("opendeploy_session"); err == nil {
+		return a.ValidateToken(cookie.Value)
+	}
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return false
+	}
+	return a.ValidateToken(strings.TrimPrefix(authHeader, "Bearer "))
+}
+
 // Middleware returns an HTTP middleware that enforces authentication.
 func (a *Auth) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,26 +223,8 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check cookie
-		cookie, err := r.Cookie("opendeploy_session")
-		if err != nil {
-			// Check Authorization header as fallback
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
-				return
-			}
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-			if !a.ValidateToken(tokenString) {
-				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		if !a.ValidateToken(cookie.Value) {
-			http.Error(w, `{"error":"session expired"}`, http.StatusUnauthorized)
+		if !a.Authorize(r) {
+			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
 			return
 		}
 
@@ -184,27 +255,27 @@ func (a *Auth) ClearSessionCookie(w http.ResponseWriter) {
 	})
 }
 
+// isLANRequest trusts the TCP peer address only. RemoteAddr is rewritten from
+// X-Forwarded-For by chi's RealIP middleware, so any client can claim a private
+// address and defeat this check — read the connection itself instead.
+// ponytail: nginx/cloudflared in front of the app means the peer is always the
+// proxy. Add a trusted-proxy header allowlist if this is ever exposed publicly.
 func isLANRequest(r *http.Request) bool {
-	ip := r.RemoteAddr
-	// Strip port
-	if idx := strings.LastIndex(ip, ":"); idx > 0 {
-		ip = ip[:idx]
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	ip = strings.Trim(ip, "[]") // IPv6 brackets
+	host = strings.Trim(host, "[]") // IPv6 brackets
 
-	// RFC 1918 private ranges + localhost
-	privateRanges := []string{
-		"127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
-		"172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-		"172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
-		"192.168.", "::1", "fe80:",
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
 	}
-	for _, prefix := range privateRanges {
-		if strings.HasPrefix(ip, prefix) {
-			return true
-		}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() {
+		return true
 	}
-	return false
+	// fe80::/10 link-local and the IPv4-mapped form of a private address.
+	return ip.IsLinkLocalMulticast()
 }
 
 func generateID() string {

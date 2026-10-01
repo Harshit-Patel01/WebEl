@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,16 @@ type authHandlers struct {
 }
 
 func (h *authHandlers) login(w http.ResponseWriter, r *http.Request) {
+	// Keyed on the TCP peer, not a client-supplied header.
+	key := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(key); err == nil {
+		key = host
+	}
+	if !h.auth.LoginAllowed(key) {
+		respondError(w, http.StatusTooManyRequests, "too many failed login attempts, try again later")
+		return
+	}
+
 	var body struct {
 		Password string `json:"password"`
 	}
@@ -30,9 +41,12 @@ func (h *authHandlers) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !h.auth.ValidatePassword(body.Password) {
+		h.auth.RecordLoginFailure(key)
 		respondError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
+
+	h.auth.ClearLoginFailures(key)
 
 	token, err := h.auth.GenerateToken()
 	if err != nil {
@@ -90,6 +104,13 @@ func (h *authHandlers) changePassword(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Rotate the signing key so sessions minted under the old password cannot
+	// outlive it. Leaves the caller logged out; the cookie is cleared below.
+	if err := h.auth.RotateJWTSecret(); err != nil {
+		respondError(w, http.StatusInternalServerError, "password changed but session rotation failed: "+err.Error())
+		return
+	}
+	h.auth.ClearSessionCookie(w)
 	respondOK(w, map[string]string{"status": "password_changed"})
 }
 
@@ -1179,14 +1200,29 @@ func (h *systemHandlers) getInfo(w http.ResponseWriter, r *http.Request) {
 	respondOK(w, info)
 }
 
+// publicSetupStateKeys are the only setup_state keys the dashboard may read.
+// setup_state also holds jwt_secret, the JWT signing key: returning the whole
+// table let any client forge admin sessions. Add keys here deliberately.
+var publicSetupStateKeys = []string{"lan_access_only"}
+
 func (h *systemHandlers) getSetupState(w http.ResponseWriter, r *http.Request) {
 	states, err := h.db.GetAllSetupStates()
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondOK(w, states)
+	safe := make(map[string]string, len(publicSetupStateKeys))
+	for _, k := range publicSetupStateKeys {
+		if v, ok := states[k]; ok {
+			safe[k] = v
+		}
+	}
+	respondOK(w, safe)
 }
+
+// writableSetupStateKeys mirrors publicSetupStateKeys: POST may only set keys
+// the dashboard is allowed to see, so jwt_secret cannot be overwritten.
+var writableSetupStateKeys = publicSetupStateKeys
 
 func (h *systemHandlers) setSetupState(w http.ResponseWriter, r *http.Request) {
 	var req map[string]string
@@ -1195,12 +1231,25 @@ func (h *systemHandlers) setSetupState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for k, v := range req {
+		if !containsString(writableSetupStateKeys, k) {
+			respondError(w, http.StatusForbidden, "setup state key not writable: "+k)
+			return
+		}
 		if err := h.db.SetSetupState(k, v); err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 	respondOK(w, map[string]string{"status": "ok"})
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Services handlers ---

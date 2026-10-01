@@ -68,6 +68,11 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var lastTimestamp time.Time
+	// Logs are inserted with Go's time.Now(), so a batch can share a timestamp.
+	// The SQL cursor is strictly ">", which would silently drop the 2nd..Nth
+	// log of such a batch. Track the ids already emitted at the cursor so a
+	// tie-inclusive query can be filtered client-side without a schema change.
+	seenAtCursor := make(map[string]bool)
 	for _, log := range existingLogs {
 		logData, _ := json.Marshal(map[string]interface{}{
 			"type":      "log",
@@ -77,6 +82,7 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		fmt.Fprintf(w, "event: log\ndata: %s\n\n", logData)
 		lastTimestamp = log.LogTimestamp
+		seenAtCursor[log.ID] = true
 	}
 	flusher.Flush()
 
@@ -116,7 +122,7 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 			// Poll for new logs
 			var newLogs []state.DeployLog
 			if !lastTimestamp.IsZero() {
-				newLogs, err = h.db.GetDeployLogsAfter(deployID, lastTimestamp)
+				newLogs, err = h.db.GetDeployLogsAtOrAfter(deployID, lastTimestamp)
 			} else {
 				newLogs, err = h.db.ListDeployLogs(deployID, 10000, 0)
 			}
@@ -127,6 +133,9 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 			}
 
 			for _, log := range newLogs {
+				if log.LogTimestamp.Equal(lastTimestamp) && seenAtCursor[log.ID] {
+					continue // already emitted as part of the cursor batch
+				}
 				logData, _ := json.Marshal(map[string]interface{}{
 					"type":      "log",
 					"stream":    log.Stream,
@@ -134,7 +143,13 @@ func (h *sseHandlers) streamDeployLogs(w http.ResponseWriter, r *http.Request) {
 					"timestamp": log.LogTimestamp,
 				})
 				fmt.Fprintf(w, "event: log\ndata: %s\n\n", logData)
+				// Moving the cursor clears the tie set: everything at or before
+				// the new timestamp has now been emitted.
+				if !log.LogTimestamp.Equal(lastTimestamp) {
+					seenAtCursor = map[string]bool{}
+				}
 				lastTimestamp = log.LogTimestamp
+				seenAtCursor[log.ID] = true
 			}
 
 			if len(newLogs) > 0 {

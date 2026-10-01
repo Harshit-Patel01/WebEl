@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"sync"
-	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +17,11 @@ import (
 )
 
 const ringBufferSize = 500
+
+// maxLogLine bounds a single captured log line. A bare bufio.Scanner defaults
+// to 64KB and silently truncates anything larger, which loses build output.
+// ponytail: 1MB per line is generous; raise only if real builds exceed it.
+const maxLogLine = 1024 * 1024
 
 type LogLevel string
 
@@ -72,6 +77,8 @@ type Runner struct {
 	mu         sync.Mutex
 	activeJobs map[string]context.CancelFunc
 	buffers    map[string]*RingBuffer
+	pgids      map[string]int
+	cancelled  map[string]bool
 }
 
 type RingBuffer struct {
@@ -112,7 +119,17 @@ func NewRunner(broadcaster Broadcaster, db *state.DB, logger *zap.Logger, logDir
 		logDir:      logDir,
 		activeJobs:  make(map[string]context.CancelFunc),
 		buffers:     make(map[string]*RingBuffer),
+		pgids:       make(map[string]int),
+		cancelled:   make(map[string]bool),
 	}
+}
+
+// newLogScanner tolerates lines up to maxLogLine. A bare bufio.Scanner stops at
+// its 64KB default and drops the rest silently.
+func newLogScanner(r io.Reader) *bufio.Scanner {
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, 64*1024), maxLogLine)
+	return s
 }
 
 func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader) (*ExecResult, error) {
@@ -134,6 +151,9 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 		cancel()
 		r.mu.Lock()
 		delete(r.activeJobs, opts.JobID)
+		delete(r.buffers, opts.JobID)
+		delete(r.pgids, opts.JobID)
+		delete(r.cancelled, opts.JobID)
 		r.mu.Unlock()
 	}()
 
@@ -208,12 +228,19 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 		return result, nil
 	}
 
+	// setPgid makes the child its own process-group leader, so its PID is also
+	// its PGID and Cancel can take down the whole tree.
+	r.mu.Lock()
+	r.pgids[opts.JobID] = cmd.Process.Pid
+	r.mu.Unlock()
+
 	r.logger.Info("job started",
 		zap.String("jobId", opts.JobID),
 		zap.String("command", opts.Command),
 	)
 
 	var wg sync.WaitGroup
+	var linesMu sync.Mutex
 
 	readStream := func(scanner *bufio.Scanner, stream string) {
 		defer wg.Done()
@@ -235,7 +262,10 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 			}
 			r.mu.Unlock()
 
+			// stdout and stderr are read concurrently; guard the shared slice.
+			linesMu.Lock()
 			result.Lines = append(result.Lines, line)
+			linesMu.Unlock()
 
 			if logFile != nil {
 				fmt.Fprintf(logFile, "[%s] [%s] [%s] %s\n",
@@ -258,11 +288,17 @@ func (r *Runner) RunWithStdin(ctx context.Context, opts RunOpts, stdin io.Reader
 				})
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			r.logger.Warn("log stream read ended early",
+				zap.String("jobId", opts.JobID),
+				zap.String("stream", stream),
+				zap.Error(err))
+		}
 	}
 
 	wg.Add(2)
-	go readStream(bufio.NewScanner(stdout), "stdout")
-	go readStream(bufio.NewScanner(stderr), "stderr")
+	go readStream(newLogScanner(stdout), "stdout")
+	go readStream(newLogScanner(stderr), "stderr")
 
 	wg.Wait()
 
@@ -312,6 +348,9 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 		cancel()
 		r.mu.Lock()
 		delete(r.activeJobs, opts.JobID)
+		delete(r.buffers, opts.JobID)
+		delete(r.pgids, opts.JobID)
+		delete(r.cancelled, opts.JobID)
 		r.mu.Unlock()
 	}()
 
@@ -363,6 +402,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 	// Set process group so we can kill the entire tree
 	setPgid(cmd)
 
+	// Record the PGID once started; see the identical block in RunWithStdin.
+
 	// Set up pipes
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -390,6 +431,12 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 		return result, nil
 	}
 
+	// setPgid makes the child its own process-group leader, so its PID is also
+	// its PGID and Cancel can take down the whole tree.
+	r.mu.Lock()
+	r.pgids[opts.JobID] = cmd.Process.Pid
+	r.mu.Unlock()
+
 	r.logger.Info("job started",
 		zap.String("jobId", opts.JobID),
 		zap.String("command", opts.Command),
@@ -397,6 +444,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 
 	// Read stdout and stderr concurrently
 	var wg sync.WaitGroup
+	var linesMu sync.Mutex
 
 	readStream := func(scanner *bufio.Scanner, stream string) {
 		defer wg.Done()
@@ -420,7 +468,9 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 			r.mu.Unlock()
 
 			// Append to result
+			linesMu.Lock()
 			result.Lines = append(result.Lines, line)
+			linesMu.Unlock()
 
 			// Write to log file
 			if logFile != nil {
@@ -446,11 +496,17 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 				})
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			r.logger.Warn("log stream read ended early",
+				zap.String("jobId", opts.JobID),
+				zap.String("stream", stream),
+				zap.Error(err))
+		}
 	}
 
 	wg.Add(2)
-	go readStream(bufio.NewScanner(stdout), "stdout")
-	go readStream(bufio.NewScanner(stderr), "stderr")
+	go readStream(newLogScanner(stdout), "stdout")
+	go readStream(newLogScanner(stderr), "stderr")
 
 	wg.Wait()
 
@@ -483,6 +539,12 @@ func (r *Runner) Run(ctx context.Context, opts RunOpts) (*ExecResult, error) {
 func (r *Runner) Cancel(jobID string) error {
 	r.mu.Lock()
 	cancel, ok := r.activeJobs[jobID]
+	pgid := r.pgids[jobID]
+	if ok {
+		// Recorded before signalling so finalizeJob keeps this status instead of
+		// downgrading the job to "failed".
+		r.cancelled[jobID] = true
+	}
 	r.mu.Unlock()
 
 	if !ok {
@@ -490,6 +552,14 @@ func (r *Runner) Cancel(jobID string) error {
 	}
 
 	cancel()
+	// Cancel the context signal only reaches the direct child; its descendants
+	// (npm, lxc, pip) would keep running and keep burning CPU on the device.
+	if err := killTree(pgid); err != nil {
+		r.logger.Warn("failed to signal job process group",
+			zap.String("jobId", jobID),
+			zap.Int("pgid", pgid),
+			zap.Error(err))
+	}
 
 	// Update job status
 	now := time.Now()
@@ -529,9 +599,18 @@ func (r *Runner) IsJobRunning(jobID string) bool {
 
 func (r *Runner) finalizeJob(job *state.Job, result *ExecResult, logPath string, broadcastID string) {
 	now := time.Now()
-	if result.Success {
+
+	r.mu.Lock()
+	wasCancelled := r.cancelled[result.JobID]
+	r.mu.Unlock()
+
+	switch {
+	case wasCancelled:
+		// Cancel already wrote the authoritative status; don't overwrite it.
+		job.Status = "cancelled"
+	case result.Success:
 		job.Status = "complete"
-	} else {
+	default:
 		job.Status = "failed"
 	}
 	job.EndedAt = &now
@@ -553,6 +632,9 @@ func (r *Runner) finalizeJob(job *state.Job, result *ExecResult, logPath string,
 			"exitCode": result.ExitCode,
 			"duration": result.Duration.String(),
 		})
+	} else if wasCancelled {
+		// Cancel already broadcast the reason; a second event only confuses the UI.
+		job.Status = "cancelled"
 	} else {
 		r.broadcaster.BroadcastToJob(broadcastID, map[string]interface{}{
 			"type":  "job_failed",
