@@ -89,9 +89,10 @@ func NewRouter(cfg *config.Config, db *state.DB, hub *ws.Hub, runner *exec.Runne
 	cleanupH := &cleanupHandlers{service: cleanupSvc}
 	apH := &apHandlers{service: wifiAP}
 
-	// WebSocket endpoint (auth checked on upgrade)
+	// WebSocket endpoint. Auth is enforced during the upgrade: browsers cannot
+	// attach headers to a handshake, so the session cookie is the credential.
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ws.ServeWS(hub, w, r)
+		ws.ServeWS(hub, w, r, a.Authorize)
 	})
 
 	// All API routes under /api/v1

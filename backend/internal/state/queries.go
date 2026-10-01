@@ -765,6 +765,30 @@ func (db *DB) CreateDeployLog(l *DeployLog) error {
 	return err
 }
 
+// GetDeployLogsAtOrAfter returns logs at or after a timestamp. Unlike
+// GetDeployLogsAfter it is inclusive, so a caller that tracks a timestamp
+// cursor does not lose rows sharing the cursor's value.
+func (db *DB) GetDeployLogsAtOrAfter(deployID string, after time.Time) ([]DeployLog, error) {
+	rows, err := db.conn.Query(
+		"SELECT id, deploy_id, log_timestamp, stream, message FROM deploy_logs WHERE deploy_id = ? AND log_timestamp >= ? ORDER BY log_timestamp ASC",
+		deployID, after,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []DeployLog
+	for rows.Next() {
+		var l DeployLog
+		if err := rows.Scan(&l.ID, &l.DeployID, &l.LogTimestamp, &l.Stream, &l.Message); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
 func (db *DB) ListDeployLogs(deployID string, limit int, offset int) ([]DeployLog, error) {
 	if limit <= 0 {
 		limit = 1000
