@@ -64,6 +64,29 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now opendeploy
 ```
 
+### Uninstallation
+To remove OpenDeploy and deregister it from the system:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Harshit-Patel01/WebEl/main/scripts/uninstall.sh | sudo bash
+```
+
+This stops and disables `opendeploy.service`, deletes the systemd unit, the
+`/usr/local/bin/opendeploy` binary, `/etc/opendeploy`, `/var/log/opendeploy`,
+`/var/www/opendeploy`, and the nginx site (`sites-available` plus the
+`sites-enabled` symlink), then reloads nginx.
+
+Projects and the state database in `/var/lib/opendeploy` are kept by default.
+To delete those too:
+
+```bash
+sudo ./scripts/uninstall.sh --purge-data
+```
+
+LXD, nginx, NetworkManager and the apt packages are shared with the rest of the
+system and are left installed. Use `sudo apt autoremove` separately if you want
+those removed as well.
+
 ## Usage Guidelines
 
 OpenDeploy runs as root via systemd, which allows it to properly manage WiFi, nginx, and LXD. 
