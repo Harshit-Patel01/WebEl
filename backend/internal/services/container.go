@@ -406,14 +406,41 @@ func (c *ContainerService) GetContainerStatus(ctx context.Context, containerID s
 }
 
 func (c *ContainerService) GetContainerLogs(ctx context.Context, containerID string, lines int) ([]string, error) {
-	// LXD doesn't provide direct container log access via command line
-	// This is a limitation of the current LXD approach
 	if lines <= 0 {
 		lines = 100
 	}
-
-	// For now, return an empty slice since LXD doesn't expose container logs directly
-	return []string{}, nil
+	lxdName := containerID
+	if rec, _ := c.db.GetContainer(containerID); rec != nil && rec.ContainerID != "" {
+		lxdName = rec.ContainerID
+	}
+	if rec, _ := c.db.GetContainerByName(containerID); rec != nil && rec.ContainerID != "" {
+		lxdName = rec.ContainerID
+	}
+	cmd := fmt.Sprintf("pm2 logs --nostream --lines %d 2>/dev/null || pm2 logs --nostream 2>/dev/null || echo no_logs_found", lines)
+	result, err := c.runner.Run(ctx, exec.RunOpts{
+		JobType: "lxd_logs",
+		Command: "lxc",
+		Args:    []string{"exec", lxdName, "--", "/bin/sh", "-c", cmd},
+		Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	if result != nil {
+		for _, line := range result.Lines {
+			if line.Stream == "stdout" {
+				out = append(out, line.Text)
+			}
+		}
+	}
+	if len(out) > lines {
+		out = out[len(out)-lines:]
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return out, nil
 }
 
 // RemoveContainer removes all containers for a project and their database records
