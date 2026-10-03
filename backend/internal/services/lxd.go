@@ -467,6 +467,7 @@ type ContainerInfo struct {
 	HostPort      int
 	ContainerPort int
 	Status        string
+	DBID          string
 }
 
 // CreateContainerWithUserDataAndFramework creates an LXD container using pre-built images when available
@@ -551,6 +552,7 @@ func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context
 		Status:      "creating",
 	}
 	_ = l.db.CreateContainer(earlyRecord)
+	earlyDBID := earlyRecord.ID
 
 	// Configure container network optimizations
 	l.logger.Info("configuring container network", zap.String("containerId", containerID))
@@ -649,6 +651,7 @@ func (l *LXDService) CreateContainerWithUserDataAndFramework(ctx context.Context
 		HostPort:      0,
 		ContainerPort: 0,
 		Status:        "running",
+		DBID:          earlyDBID,
 	}, nil
 }
 
