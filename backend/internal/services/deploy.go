@@ -555,25 +555,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			logToDB("stdout", "Backend service started (managed by PM2)")
 
 			// Save both containers to database
-			frontendContainer := &state.Container{
-				ProjectID:    project.ID,
-				Name:         frontendContainerInfo.Name,
-				Image:        "images:alpine/3.23",
-				ContainerID:  frontendContainerInfo.ID,
-				Status:       "running",
-				PortMappings: fmt.Sprintf(`{"host":"%d","container":"80"}`, frontendHostPort),
-			}
-			d.db.CreateContainer(frontendContainer)
-
-			backendContainer := &state.Container{
-				ProjectID:    project.ID,
-				Name:         backendContainerInfo.Name,
-				Image:        "images:alpine/3.23",
-				ContainerID:  backendContainerInfo.ID,
-				Status:       "running",
-				PortMappings: fmt.Sprintf(`{"host":"%d","container":"%d"}`, backendHostPort, backendContainerPort),
-			}
-			d.db.CreateContainer(backendContainer)
+			d.promoteContainer(frontendContainerInfo, project.ID, fmt.Sprintf(`{"host":"%d","container":"80"}`, frontendHostPort))
+			d.promoteContainer(backendContainerInfo, project.ID, fmt.Sprintf(`{"host":"%d","container":"%d"}`, backendHostPort, backendContainerPort))
 
 			if opts != nil && opts.EnableNginx && opts.Domain != "" {
 				logToDB("stdout", "Configuring host nginx for domain routing (listen 80)...")
@@ -1125,17 +1108,8 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 
 			// Save container info to database
-			container := &state.Container{
-				ProjectID:    project.ID,
-				Name:         containerInfo.Name,
-				Image:        "images:alpine/3.23",
-				ContainerID:  containerInfo.ID,
-				Status:       "running",
-				PortMappings: fmt.Sprintf(`{"host":"%d","container":"%d"}`, hostPort, containerPort),
-			}
-			if err := d.db.CreateContainer(container); err != nil {
-				logToDB("stderr", fmt.Sprintf("Failed to save container: %s", err.Error()))
-				// Continue anyway, don't fail the deploy just for DB error
+			if perr := d.promoteContainer(containerInfo, project.ID, fmt.Sprintf(`{"host":"%d","container":"%d"}`, hostPort, containerPort)); perr != nil {
+				logToDB("stderr", fmt.Sprintf("Failed to save container: %s", perr.Error()))
 			}
 
 			logToDB("stdout", fmt.Sprintf("LXD deployment completed! Container: %s, Host Port: %d", containerInfo.Name, hostPort))
@@ -1270,6 +1244,83 @@ func (d *DeployService) Rebuild(ctx context.Context, project *state.Project) (st
 
 	// Trigger fresh deployment
 	return d.Deploy(ctx, project)
+}
+
+func (d *DeployService) promoteContainer(info *ContainerInfo, projectID, portMappings string) error {
+	if info == nil {
+		return fmt.Errorf("nil container info")
+	}
+	if info.DBID != "" {
+		if rec, _ := d.db.GetContainer(info.DBID); rec != nil {
+			rec.ProjectID = projectID
+			rec.Name = info.Name
+			rec.ContainerID = info.ID
+			rec.Status = "running"
+			rec.PortMappings = portMappings
+			if err := d.db.UpdateContainer(rec); err != nil {
+				return err
+			}
+			d.removeStaleCreatingContainers(projectID, rec.ID, info.ID)
+			return nil
+		}
+	}
+	if rec, _ := d.db.GetContainerByName(info.Name); rec != nil {
+		rec.ProjectID = projectID
+		rec.ContainerID = info.ID
+		rec.Status = "running"
+		rec.PortMappings = portMappings
+		if err := d.db.UpdateContainer(rec); err != nil {
+			return err
+		}
+		d.removeStaleCreatingContainers(projectID, rec.ID, info.ID)
+		return nil
+	}
+	for _, pid := range []string{projectID, projectID + "-frontend", projectID + "-backend"} {
+		if containers, _ := d.db.ListContainersByProject(pid); len(containers) > 0 {
+			for _, c := range containers {
+				if c.ContainerID == info.ID {
+					c.ProjectID = projectID
+					c.Name = info.Name
+					c.Status = "running"
+					c.PortMappings = portMappings
+					if err := d.db.UpdateContainer(&c); err != nil {
+						return err
+					}
+					d.removeStaleCreatingContainers(projectID, c.ID, info.ID)
+					return nil
+				}
+			}
+		}
+	}
+	rec := &state.Container{
+		ProjectID:    projectID,
+		Name:         info.Name,
+		Image:        "images:alpine/3.23",
+		ContainerID:  info.ID,
+		Status:       "running",
+		PortMappings: portMappings,
+	}
+	if err := d.db.CreateContainer(rec); err != nil {
+		return err
+	}
+	d.removeStaleCreatingContainers(projectID, rec.ID, info.ID)
+	return nil
+}
+
+func (d *DeployService) removeStaleCreatingContainers(projectID, keepID, lxdName string) {
+	for _, pid := range []string{projectID, projectID + "-frontend", projectID + "-backend"} {
+		containers, _ := d.db.ListContainersByProject(pid)
+		for _, c := range containers {
+			if c.ID == keepID {
+				continue
+			}
+			if c.Status == "creating" && (c.ContainerID == lxdName || c.ProjectID == pid) {
+				if c.ContainerID == lxdName || c.Name == "" || len(containers) > 1 {
+					d.db.DeleteContainer(c.ID)
+				}
+			}
+		}
+	}
 }
 
 func (d *DeployService) failDeploy(deploy *state.Deploy, errMsg string) {
