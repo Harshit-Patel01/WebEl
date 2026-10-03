@@ -1,0 +1,22 @@
+# Development config
+dev_config.yaml
+config.yaml
+
+# Generated artifacts
+state.db
+*.db
+output/
+projects/
+logs/
+
+# Cache
+*.tmp
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

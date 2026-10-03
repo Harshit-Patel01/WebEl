@@ -1,0 +1,24 @@
+[Unit]
+Description=opendeploy Hosting Dashboard
+After=local-fs.target network-online.target avahi-daemon.service NetworkManager.service
+Wants=network-online.target avahi-daemon.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+ExecStartPre=/usr/bin/mkdir -p /var/lib/opendeploy /var/log/opendeploy
+ExecStart=/usr/local/bin/opendeploy --config /etc/opendeploy/config.yaml
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=opendeploy
+
+Environment=OPENDEPLOY_ENV=production
+Environment=GODEBUG=netdns=go
+
+[Install]
+WantedBy=multi-user.target
