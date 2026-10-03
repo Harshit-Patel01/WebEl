@@ -20,8 +20,8 @@ import (
 )
 
 type NginxSiteConfig struct {
-	Domain               string `json:"domain"`
-	FrontendPath         string `json:"frontend_path"`
+	Domain string `json:"domain"`
+	FrontendPath string `json:"frontend_path"`
 	ListenPort           int    `json:"listen_port"`
 	ProxyEnabled         bool   `json:"proxy_enabled"`
 	ProxyPort            int    `json:"proxy_port"`

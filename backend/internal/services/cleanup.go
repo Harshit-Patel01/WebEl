@@ -421,32 +421,34 @@ func (c *CleanupService) DeleteProject(ctx context.Context, projectID string) er
 		}
 	}
 
-	// 6. Remove nginx site config if domain is set
 	if project.Domain != "" {
 		c.logger.Info("removing nginx site config", zap.String("domain", project.Domain))
-
-		// Delete nginx config files
 		sitesAvailable := "/etc/nginx/sites-available"
 		sitesEnabled := "/etc/nginx/sites-enabled"
-
-		availablePath := filepath.Join(sitesAvailable, project.Domain)
-		enabledPath := filepath.Join(sitesEnabled, project.Domain)
-
-		os.Remove(enabledPath)
-		os.Remove(availablePath)
-
-		// Reload nginx
-		c.runner.Run(ctx, exec.RunOpts{
+		for _, name := range []string{project.Domain, "frontend-" + project.Domain, "backend-" + project.Domain} {
+			os.Remove(filepath.Join(sitesEnabled, name))
+			os.Remove(filepath.Join(sitesAvailable, name))
+			c.runner.Run(ctx, exec.RunOpts{
+				JobType: "nginx_delete",
+				Command: "/usr/bin/sudo",
+				Args:    []string{"/usr/bin/rm", "-f", filepath.Join(sitesEnabled, name), filepath.Join(sitesAvailable, name)},
+				Timeout: 5 * time.Second,
+			})
+		}
+		if res, err := c.runner.Run(ctx, exec.RunOpts{
 			JobType: "nginx_reload",
 			Command: "/usr/bin/sudo",
 			Args:    []string{"/usr/bin/systemctl", "reload", "nginx"},
 			Timeout: 10 * time.Second,
-		})
-
-		// Remove nginx_sites record from database
-		site, _ := c.db.GetNginxSiteByProjectID(projectID)
-		if site != nil {
-			c.db.DeleteNginxSite(site.ID)
+		}); err != nil || (res != nil && !res.Success) {
+			c.logger.Error("nginx reload failed", zap.Error(err))
+		}
+	}
+	if sites, err := c.db.ListNginxSites(); err == nil {
+		for _, s := range sites {
+			if s.ProjectID == projectID || s.ProjectID == projectID+"-frontend" || s.ProjectID == projectID+"-backend" || (project.Domain != "" && s.Domain == project.Domain) {
+				c.db.DeleteNginxSite(s.ID)
+			}
 		}
 	}
 

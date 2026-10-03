@@ -575,37 +575,27 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 			}
 			d.db.CreateContainer(backendContainer)
 
-			// Configure host nginx if domain provided
 			if opts != nil && opts.EnableNginx && opts.Domain != "" {
-				logToDB("stdout", "Configuring host nginx for domain routing...")
+				logToDB("stdout", "Configuring host nginx for domain routing (listen 80)...")
 				domain := opts.Domain
-
-				// Frontend config
-				frontendCfg := NginxSiteConfig{
+				siteCfg := NginxSiteConfig{
 					Domain:               domain,
+					ListenPort:           80,
 					FrontendProxyEnabled: true,
 					FrontendProxyPort:    frontendHostPort,
+					ProxyEnabled:         true,
+					ProxyPort:            backendHostPort,
 				}
-				frontendConfigContent := d.nginx.GenerateFrontendConfig(frontendCfg)
-				if err := d.nginx.WriteConfig(fmt.Sprintf("frontend-%s", domain), frontendConfigContent); err != nil {
-					logToDB("stderr", fmt.Sprintf("Frontend nginx config failed: %s", err.Error()))
+				combinedContent := d.nginx.GenerateConfig(siteCfg)
+				if err := d.nginx.WriteConfig(domain, combinedContent); err != nil {
+					logToDB("stderr", fmt.Sprintf("Nginx config failed: %s", err.Error()))
+				} else {
+					_ = d.nginx.DeleteConfigFile(fmt.Sprintf("frontend-%s", domain))
+					_ = d.nginx.DeleteConfigFile(fmt.Sprintf("backend-%s", domain))
 				}
-
-				// Backend config
-				backendCfg := NginxSiteConfig{
-					Domain:       domain,
-					ProxyEnabled: true,
-					ProxyPort:    backendHostPort,
-				}
-				backendConfigContent := d.nginx.GenerateBackendConfig(backendCfg)
-				if err := d.nginx.WriteConfig(fmt.Sprintf("backend-%s", domain), backendConfigContent); err != nil {
-					logToDB("stderr", fmt.Sprintf("Backend nginx config failed: %s", err.Error()))
-				}
-
-				// Reload nginx
 				if testResult, err := d.nginx.TestConfig(deployCtx); err == nil && testResult.Success {
 					d.nginx.Reload(deployCtx)
-					logToDB("stdout", fmt.Sprintf("Nginx configured: frontend port %d, backend port %d", frontendHostPort, backendHostPort))
+					logToDB("stdout", fmt.Sprintf("Nginx configured: %s listen 80 -> frontend %d, backend %d", domain, frontendHostPort, backendHostPort))
 				}
 			}
 
@@ -1150,32 +1140,38 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 
 			logToDB("stdout", fmt.Sprintf("LXD deployment completed! Container: %s, Host Port: %d", containerInfo.Name, hostPort))
 
-			// Set proxy ports for nginx configuration
 			frontendProxyPort := 0
-			backendProxyPort := hostPort // For single container deployments, backend uses the allocated port
+			backendProxyPort := hostPort
 			if !isBackend {
 				frontendProxyPort = hostPort
 			}
-
-			// Configure nginx if domain or AttachToProjectID is provided
 			if opts != nil && opts.EnableNginx && (opts.Domain != "" || opts.AttachToProjectID != "") {
-				logToDB("stdout", "Configuring nginx...")
-
+				logToDB("stdout", "Configuring nginx (listen 80)...")
 				domainToUse := opts.Domain
-				// If attaching to an existing frontend project, we create a separate backend config that shares the domain
+				attachedFrontendPort := 0
 				if opts.AttachToProjectID != "" && isBackend {
 					frontendProj, err := d.db.GetProject(opts.AttachToProjectID)
 					if err == nil && frontendProj != nil && frontendProj.Domain != "" {
 						domainToUse = frontendProj.Domain
 						logToDB("stdout", fmt.Sprintf("Creating backend config for domain: %s", domainToUse))
-
-						// No need to fetch frontend port - the frontend has its own config
-						// We just need our backend proxy port
+						if frontendContainers, err := d.db.ListContainersByProject(opts.AttachToProjectID); err == nil {
+							for _, fc := range frontendContainers {
+								if hp, _, perr := parsePortMapping(fc.PortMappings); perr == nil && hp > 0 {
+									attachedFrontendPort = hp
+									break
+								}
+							}
+						}
+						if attachedFrontendPort > 0 {
+							frontendProxyPort = attachedFrontendPort
+							logToDB("stdout", fmt.Sprintf("Found frontend host port: %d", attachedFrontendPort))
+						} else {
+							logToDB("stderr", "Warning: Could not find frontend container port; backend routing only")
+						}
 					} else {
 						logToDB("stderr", "Warning: Could not find domain for attached frontend project")
 					}
 				}
-
 				if domainToUse != "" {
 					nginxPort, err := d.applyNginxForDeploy(deployCtx, project, domainToUse, "", isBackend, frontendProxyPort, backendProxyPort)
 					if err != nil {
@@ -1188,7 +1184,7 @@ func (d *DeployService) DeployWithOptions(ctx context.Context, project *state.Pr
 						} else if !isBackend && frontendProxyPort > 0 {
 							configType = "frontend"
 						}
-						logToDB("stdout", fmt.Sprintf("Nginx %s config configured for %s (listen port: %d)", configType, domainToUse, nginxPort))
+						logToDB("stdout", fmt.Sprintf("Nginx %s config configured for %s (listen %d -> frontend %d, backend %d)", configType, domainToUse, nginxPort, frontendProxyPort, backendProxyPort))
 					}
 				}
 			}

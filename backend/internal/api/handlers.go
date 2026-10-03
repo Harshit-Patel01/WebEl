@@ -992,6 +992,7 @@ func (h *nginxHandlers) createSite(w http.ResponseWriter, r *http.Request) {
 	configContent := h.service.GenerateConfig(services.NginxSiteConfig{
 		Domain:       body.Domain,
 		FrontendPath: body.FrontendPath,
+		ListenPort:   80,
 		ProxyEnabled: body.ProxyEnabled,
 		ProxyPort:    body.ProxyPort,
 	})
@@ -1042,6 +1043,7 @@ func (h *nginxHandlers) updateSite(w http.ResponseWriter, r *http.Request) {
 	configContent := h.service.GenerateConfig(services.NginxSiteConfig{
 		Domain:       body.Domain,
 		FrontendPath: body.FrontendPath,
+		ListenPort:   80,
 		ProxyEnabled: body.ProxyEnabled,
 		ProxyPort:    body.ProxyPort,
 	})
@@ -1066,6 +1068,15 @@ func (h *nginxHandlers) updateSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *nginxHandlers) deleteSite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	existing, _ := h.db.GetNginxSite(id)
+	if existing != nil {
+		for _, name := range []string{existing.Domain, "frontend-" + existing.Domain, "backend-" + existing.Domain} {
+			_ = h.service.DeleteConfigFile(name)
+		}
+		if res, err := h.service.TestConfig(r.Context()); err == nil && res.Success {
+			_ = h.service.Reload(r.Context())
+		}
+	}
 	if err := h.db.DeleteNginxSite(id); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

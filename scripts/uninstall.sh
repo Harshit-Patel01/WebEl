@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# OpenDeploy uninstaller for Raspberry Pi / Debian / Ubuntu.
-#
-# Removes everything install.sh created: systemd unit, binary, config, state
-# database, job logs, and the nginx site. LXD, nginx and the apt packages
-# installed by install.sh are shared with the rest of the system and are
-# deliberately left in place.
-#
-# Usage:
-#   sudo ./scripts/uninstall.sh
-#   curl -fsSL https://raw.githubusercontent.com/Harshit-Patel01/WebEl/main/scripts/uninstall.sh | sudo bash
-#
-# Flags:
-#   --purge-data   also delete /var/lib/opendeploy (projects, state.db, logs).
-#                  Without this flag the data directory is kept.
-#   --keep-nginx   leave the nginx site in place.
 set -euo pipefail
 
 CONFIG_DIR="/etc/opendeploy"
@@ -27,6 +12,7 @@ NGINX_ENABLED="/etc/nginx/sites-enabled/opendeploy"
 
 PURGE_DATA=0
 KEEP_NGINX=0
+KEEP_CONTAINERS=0
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -39,10 +25,11 @@ err()  { echo -e "${RED}[opendeploy]${NC} $*" >&2; }
 
 usage() {
   cat <<'EOF'
-Usage: sudo ./scripts/uninstall.sh [--purge-data] [--keep-nginx]
+Usage: sudo ./scripts/uninstall.sh [--purge-data] [--keep-nginx] [--keep-containers]
 
-  --purge-data   delete /var/lib/opendeploy (projects, state.db, logs)
-  --keep-nginx   leave the nginx site configuration in place
+  --purge-data      delete /var/lib/opendeploy (projects, state.db, logs)
+  --keep-nginx      leave the nginx site configuration in place
+  --keep-containers leave LXD containers created by OpenDeploy in place
 EOF
 }
 
@@ -58,6 +45,7 @@ parse_args() {
     case "$1" in
       --purge-data) PURGE_DATA=1; shift ;;
       --keep-nginx) KEEP_NGINX=1; shift ;;
+      --keep-containers) KEEP_CONTAINERS=1; shift ;;
       -h|--help)   usage; exit 0 ;;
       *) err "Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -75,8 +63,33 @@ stop_service() {
     rm -f "${SERVICE_DEST}"
     log "Removed systemd unit."
   fi
-  systemctl daemon-reload
+  systemctl daemon-reload || warn "daemon-reload failed"
   systemctl reset-failed opendeploy.service >/dev/null 2>&1 || true
+}
+
+remove_containers() {
+  if [[ "${KEEP_CONTAINERS}" -eq 1 ]]; then
+    warn "Keeping LXD containers (--keep-containers)."
+    return
+  fi
+  if ! command -v lxc >/dev/null 2>&1; then
+    log "lxc not found, skipping container cleanup."
+    return
+  fi
+  local containers=""
+  containers="$(lxc list --format csv --columns n 2>/dev/null | grep '^opendeploy-' || true)"
+  if [[ -z "${containers}" ]]; then
+    log "No OpenDeploy containers to remove."
+    return
+  fi
+  local c
+  for c in ${containers}; do
+    log "Stopping container ${c}..."
+    lxc stop --force "${c}" >/dev/null 2>&1 || warn "could not stop ${c}, trying delete anyway"
+    log "Deleting container ${c}..."
+    lxc delete --force "${c}" >/dev/null 2>&1 || warn "could not delete ${c}"
+  done
+  log "Removed OpenDeploy containers."
 }
 
 remove_binary() {
@@ -123,9 +136,50 @@ remove_nginx_site() {
     rm -f "${NGINX_ENABLED}"
     removed=1
   fi
-  if [[ -f "${NGINX_AVAILABLE}" ]]; then
+  if [[ -e "${NGINX_AVAILABLE}" || -L "${NGINX_AVAILABLE}" ]]; then
     rm -f "${NGINX_AVAILABLE}"
     removed=1
+  fi
+  local f
+  for f in /etc/nginx/sites-enabled/frontend-* /etc/nginx/sites-enabled/backend-* /etc/nginx/sites-available/frontend-* /etc/nginx/sites-available/backend-*; do
+    if [[ -e "${f}" || -L "${f}" ]]; then
+      rm -f "${f}"
+      removed=1
+    fi
+  done
+  local db_path="${DATA_DIR}/state.db"
+  if [[ -f "${db_path}" ]] && command -v sqlite3 >/dev/null 2>&1; then
+    local domains=""
+    domains="$(sqlite3 "${db_path}" "SELECT domain FROM projects WHERE domain IS NOT NULL AND domain != ''; SELECT domain FROM nginx_sites WHERE domain IS NOT NULL AND domain != '';" 2>/dev/null | sort -u || true)"
+    local d
+    for d in ${domains}; do
+      [[ "${d}" == *"/"* ]] && continue
+      [[ "${d}" == *".."* ]] && continue
+      if [[ -e "/etc/nginx/sites-enabled/${d}" || -L "/etc/nginx/sites-enabled/${d}" ]]; then
+        rm -f "/etc/nginx/sites-enabled/${d}"
+        removed=1
+      fi
+      if [[ -e "/etc/nginx/sites-available/${d}" || -L "/etc/nginx/sites-available/${d}" ]]; then
+        rm -f "/etc/nginx/sites-available/${d}"
+        removed=1
+      fi
+      if [[ -e "/etc/nginx/sites-enabled/frontend-${d}" || -L "/etc/nginx/sites-enabled/frontend-${d}" ]]; then
+        rm -f "/etc/nginx/sites-enabled/frontend-${d}"
+        removed=1
+      fi
+      if [[ -e "/etc/nginx/sites-available/frontend-${d}" || -L "/etc/nginx/sites-available/frontend-${d}" ]]; then
+        rm -f "/etc/nginx/sites-available/frontend-${d}"
+        removed=1
+      fi
+      if [[ -e "/etc/nginx/sites-enabled/backend-${d}" || -L "/etc/nginx/sites-enabled/backend-${d}" ]]; then
+        rm -f "/etc/nginx/sites-enabled/backend-${d}"
+        removed=1
+      fi
+      if [[ -e "/etc/nginx/sites-available/backend-${d}" || -L "/etc/nginx/sites-available/backend-${d}" ]]; then
+        rm -f "/etc/nginx/sites-available/backend-${d}"
+        removed=1
+      fi
+    done
   fi
   if [[ "${removed}" -eq 1 ]]; then
     log "Removed nginx site."
@@ -133,7 +187,7 @@ remove_nginx_site() {
 
   if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx; then
     if nginx -t >/dev/null 2>&1; then
-      systemctl reload nginx
+      systemctl reload nginx || warn "nginx reload failed"
       log "Reloaded nginx."
     else
       err "nginx config test failed; not reloading. Run: sudo nginx -t"
@@ -154,10 +208,11 @@ main() {
   parse_args "$@"
 
   stop_service
+  remove_containers
+  remove_nginx_site
   remove_binary
   remove_config
   remove_data
-  remove_nginx_site
   summary
 }
 

@@ -4,39 +4,64 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 
 	"github.com/opendeploy/opendeploy/internal/state"
 	"go.uber.org/zap"
 )
 
-func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) (nginxListenPort int, err error) {
+const nginxListenPort = 80
+
+var (
+	frontendProxyRegex = regexp.MustCompile(`location /\s*\{\s*\n\s*proxy_pass http://[^:\s]+:(\d+);`)
+	backendProxyRegex  = regexp.MustCompile(`location /api/\s*\{\s*\n\s*proxy_pass http://[^:\s]+:(\d+);`)
+)
+
+func extractPortsFromNginxConfig(content string) (frontendPort, backendPort int) {
+	if m := frontendProxyRegex.FindStringSubmatch(content); len(m) == 2 {
+		if p, err := strconv.Atoi(m[1]); err == nil {
+			frontendPort = p
+		}
+	}
+	if m := backendProxyRegex.FindStringSubmatch(content); len(m) == 2 {
+		if p, err := strconv.Atoi(m[1]); err == nil {
+			backendPort = p
+		}
+	}
+	return frontendPort, backendPort
+}
+
+func (d *DeployService) lookupExistingProxyPorts(domain string) (frontendPort, backendPort int) {
+	if d.nginx == nil {
+		return 0, 0
+	}
+	for _, name := range []string{domain, "frontend-" + domain, "backend-" + domain} {
+		content, err := d.nginx.ReadConfigFile(name)
+		if err != nil || content == "" {
+			continue
+		}
+		fp, bp := extractPortsFromNginxConfig(content)
+		if frontendPort == 0 && fp > 0 {
+			frontendPort = fp
+		}
+		if backendPort == 0 && bp > 0 {
+			backendPort = bp
+		}
+	}
+	return frontendPort, backendPort
+}
+
+func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.Project, domain, outputPath string, isBackend bool, frontendHostPort, backendHostPort int) (int, error) {
 	if d.nginx == nil {
 		return 0, fmt.Errorf("nginx service not configured")
 	}
 
-	// Validate domain
 	if !IsValidDomain(domain) {
 		return 0, fmt.Errorf("invalid domain: %s", domain)
 	}
 
-	// Allocate a unique host nginx listen port for this service
-	nginxListenPort, err = d.portAllocator.AllocatePort(fmt.Sprintf("nginx-%s", domain))
-	if err != nil {
-		return 0, fmt.Errorf("failed to allocate nginx listen port: %w", err)
-	}
-	d.logger.Info("allocated nginx listen port",
-		zap.String("domain", domain),
-		zap.Int("nginxPort", nginxListenPort),
-	)
-
-	// Generate config filename based on type
-	var configName string
-	if isBackend {
-		configName = fmt.Sprintf("backend-%s", domain)
-	} else {
-		configName = fmt.Sprintf("frontend-%s", domain)
-	}
+	configName := domain
 
 	d.logger.Info("applying nginx config",
 		zap.String("domain", domain),
@@ -45,13 +70,11 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		zap.Int("listenPort", nginxListenPort),
 	)
 
-	// Determine proxy settings for backend
 	var proxyEnabled bool
 	var proxyPort int
 
 	if isBackend {
 		if backendHostPort > 0 {
-			// Use the host port passed directly from the deploy flow
 			proxyEnabled = true
 			proxyPort = backendHostPort
 			d.logger.Info("using backend proxy",
@@ -59,7 +82,6 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 				zap.Int("proxyPort", backendHostPort),
 			)
 		} else {
-			// Fallback: look up container from DB (for single-app backend deploys)
 			container, err := d.db.GetContainerByProjectID(project.ID)
 			if err != nil || container == nil {
 				d.logger.Warn("backend deploy but no container found",
@@ -81,15 +103,36 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		}
 	}
 
-	// Determine frontend proxy settings
 	var frontendProxyEnabled bool
 	var frontendProxyPort int
 	if !isBackend && frontendHostPort > 0 {
 		frontendProxyEnabled = true
 		frontendProxyPort = frontendHostPort
 	}
+	if isBackend && frontendHostPort > 0 {
+		frontendProxyEnabled = true
+		frontendProxyPort = frontendHostPort
+	}
 
-	// Generate nginx config for this specific type (frontend or backend)
+	if existingFrontend, existingBackend := d.lookupExistingProxyPorts(domain); existingFrontend > 0 || existingBackend > 0 {
+		if !frontendProxyEnabled && existingFrontend > 0 && existingFrontend != proxyPort {
+			frontendProxyEnabled = true
+			frontendProxyPort = existingFrontend
+			d.logger.Info("preserving existing frontend proxy",
+				zap.String("domain", domain),
+				zap.Int("frontendProxyPort", existingFrontend),
+			)
+		}
+		if !proxyEnabled && existingBackend > 0 && existingBackend != frontendProxyPort {
+			proxyEnabled = true
+			proxyPort = existingBackend
+			d.logger.Info("preserving existing backend proxy",
+				zap.String("domain", domain),
+				zap.Int("proxyPort", existingBackend),
+			)
+		}
+	}
+
 	siteCfg := NginxSiteConfig{
 		Domain:               domain,
 		FrontendPath:         outputPath,
@@ -100,20 +143,16 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		FrontendProxyPort:    frontendProxyPort,
 	}
 
-	// Generate config content based on type
-	var configContent string
-	if isBackend {
-		configContent = d.nginx.GenerateBackendConfig(siteCfg)
-	} else {
-		configContent = d.nginx.GenerateFrontendConfig(siteCfg)
-	}
+	configContent := d.nginx.GenerateConfig(siteCfg)
 
-	// Write config atomically (use configName instead of domain)
 	if err := d.nginx.WriteConfig(configName, configContent); err != nil {
 		return 0, fmt.Errorf("failed to write nginx config: %w", err)
 	}
 
-	// Test config before reload
+	for _, legacy := range []string{"frontend-" + domain, "backend-" + domain} {
+		_ = d.nginx.DeleteConfigFile(legacy)
+	}
+
 	testResult, err := d.nginx.TestConfig(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("nginx config test failed: %w", err)
@@ -122,7 +161,6 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 		return 0, fmt.Errorf("nginx config test failed: %s", testResult.Output)
 	}
 
-	// Reload nginx
 	if err := d.nginx.Reload(ctx); err != nil {
 		return 0, fmt.Errorf("failed to reload nginx: %w", err)
 	}
@@ -141,13 +179,11 @@ func (d *DeployService) applyNginxForDeploy(ctx context.Context, project *state.
 	return nginxListenPort, nil
 }
 
-// parsePortMapping extracts host and container ports from the JSON port_mappings field
 func parsePortMapping(portMappingsJSON string) (hostPort int, containerPort int, err error) {
 	if portMappingsJSON == "" {
 		return 0, 0, fmt.Errorf("empty port mappings")
 	}
 
-	// Parse JSON: {"host":"8080","container":"3000"}
 	var mapping struct {
 		Host      string `json:"host"`
 		Container string `json:"container"`
